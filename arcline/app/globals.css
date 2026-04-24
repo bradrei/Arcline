@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0A0A0F;
+  --surface: #12121A;
+  --foreground: #FFFFFF;
+  --foreground-muted: #A0A0B0;
+  --brand-teal: #00D4A8;
+  --brand-teal-dim: #00A882;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-dim: var(--brand-teal-dim);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
