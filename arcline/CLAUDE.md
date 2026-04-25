@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 2 — April 2026  
-**Next session:** Session 3 — Biological profile onboarding
+**Last completed session:** Session 3 — April 2026  
+**Next session:** Session 4 — Plan generation + dashboard
 
 ---
 
@@ -57,7 +57,6 @@ arcline/
 ```
 
 ### What is NOT built yet
-- Onboarding flow — Session 3
 - Plan generation + dashboard — Session 4
 - Session logging (manual + screenshot) — Session 5
 - Strava integration — Session 6
@@ -137,6 +136,30 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 3 — April 2026
+**Completed:**
+- `lib/ai/detectInjury.ts` — HC2 classifier using claude-haiku-4-5-20251001. Gracefully skips if API key not configured. Safe default: returns `injured: false` on classifier failure (never blocks user).
+- `lib/ai/generateFallbackPlan.ts` — stub plan generator. Creates a 4-week base plan from user's weekly_hours_available + weekly_days_available. is_fallback=true. Session 4 replaces with AI generation.
+- `lib/onboarding/actions.ts` — saveStep, checkInjuryText, confirmInjuryReferral, dismissInjuryAsFalsePositive, completeOnboarding server actions.
+- `components/InjuryReferralScreen.tsx` — full HC2 referral screen. No X button. Two paths: confirm (professional seen) + false positive escape. External sports therapist link opens in new tab.
+- 7 step components in `app/app/onboarding/_components/`: Step1–7, ProgressBar, StepNav.
+- `OnboardingFlow.tsx` — client orchestrator. Framer Motion AnimatePresence for step transitions. HC2 check on Step 5. completeOnboarding + redirect on Step 7.
+- `app/app/onboarding/page.tsx` — server component. Loads profile, redirects if already complete.
+- Back navigation never loses data (accumulated formData state in parent).
+- Partial completion resumable — profile is pre-populated from existing Supabase data on load.
+
+**Deferred:**
+- AI plan generation — fallback plan used until Session 4
+- Unit conversion display is local state only (metric/imperial toggle in Step 2) — always stored in metric
+
+**Decisions not in prompt:**
+- `detectInjury` safe-defaults to `injured: false` on JSON parse failure or API error — never block the user due to classifier failure
+- Step 5 HC2 during onboarding: writes to injury_flags but does NOT pause a plan (no plan exists yet). User can continue after confirmation or false-positive dismissal.
+- `'use server'` not placed at file top for detectInjury.ts — it is called from server actions, not directly from client. Kept as a plain async function imported into server action files.
+
+**Technical debt deliberately introduced:**
+- `// TODO [Session 4]`: generateFallbackPlan called from completeOnboarding — replace with AI generation
 
 ### Session 2 — April 2026
 **Completed:**
