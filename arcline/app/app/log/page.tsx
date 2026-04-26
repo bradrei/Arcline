@@ -1,9 +1,20 @@
-// Shell — full implementation in Session 5
-export default function LogPage() {
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { LogTabs } from './_components/LogTabs'
+
+export const metadata = { title: 'Log session — Arcline' }
+
+export default async function LogPage() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
   return (
-    <main className="flex flex-1 flex-col items-center justify-center px-6 py-24">
-      <h1 className="text-3xl font-bold text-foreground">Log session</h1>
-      <p className="mt-3 text-foreground-muted">Session 5 — coming soon.</p>
+    <main className="mx-auto w-full max-w-lg flex-1 px-6 py-8">
+      <h1 className="mb-8 text-2xl font-bold text-foreground">Log session</h1>
+      <LogTabs />
     </main>
   )
 }

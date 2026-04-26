@@ -22,7 +22,7 @@ export interface Profile {
   updated_at: string
 }
 
-export type SessionType = 'swim' | 'bike' | 'run' | 'brick' | 'strength' | 'rest' | 'other'
+export type SessionType = 'swim' | 'bike' | 'run' | 'brick' | 'strength' | 'rest' | 'open_water' | 'race' | 'other'
 export type Intensity = 'easy' | 'moderate' | 'hard' | 'race_pace'
 
 export interface PlanSession {
@@ -56,6 +56,8 @@ export interface Plan {
   adaptation_count: number
   is_fallback: boolean
 }
+
+export type NewSession = Omit<TrainingSession, 'id' | 'logged_at'>
 
 // Named TrainingSession to avoid collision with Supabase's auth Session type
 export interface TrainingSession {

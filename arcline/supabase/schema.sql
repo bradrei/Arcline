@@ -107,6 +107,15 @@ CREATE TABLE IF NOT EXISTS waitlist (
   created_at timestamptz DEFAULT now()
 );
 
+-- Added Session 5: queue for adaptation retries when trigger fails
+CREATE TABLE IF NOT EXISTS adaptation_queue (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  session_id uuid REFERENCES sessions(id) ON DELETE CASCADE,
+  created_at timestamptz DEFAULT now(),
+  processed boolean DEFAULT false
+);
+
 -- Added Session 4: queue for background AI plan regeneration when fallback was used
 CREATE TABLE IF NOT EXISTS plan_generation_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
