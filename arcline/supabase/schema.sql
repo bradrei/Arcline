@@ -1,14 +1,6 @@
 -- Arcline database schema
--- Run this once in the Supabase SQL editor on a fresh project.
--- All statements use IF NOT EXISTS / OR REPLACE for idempotency.
-
--- ─────────────────────────────────────────────
--- Pre-flight: show existing tables
--- ─────────────────────────────────────────────
-SELECT table_name
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
+-- Run this in the Supabase SQL editor. Safe to re-run — all statements are idempotent.
+-- When the editor shows the RLS dialog, click "Run" (not "Run without RLS").
 
 -- ─────────────────────────────────────────────
 -- Tables
@@ -107,7 +99,6 @@ CREATE TABLE IF NOT EXISTS waitlist (
   created_at timestamptz DEFAULT now()
 );
 
--- Added Session 5: queue for adaptation retries when trigger fails
 CREATE TABLE IF NOT EXISTS adaptation_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
@@ -116,7 +107,6 @@ CREATE TABLE IF NOT EXISTS adaptation_queue (
   processed boolean DEFAULT false
 );
 
--- Added Session 4: queue for background AI plan regeneration when fallback was used
 CREATE TABLE IF NOT EXISTS plan_generation_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
@@ -126,7 +116,7 @@ CREATE TABLE IF NOT EXISTS plan_generation_queue (
 );
 
 -- ─────────────────────────────────────────────
--- Row Level Security
+-- Row Level Security — public tables
 -- ─────────────────────────────────────────────
 
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
@@ -135,6 +125,8 @@ ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE adaptations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE injury_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hc2_false_positives ENABLE ROW LEVEL SECURITY;
+ALTER TABLE adaptation_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plan_generation_queue ENABLE ROW LEVEL SECURITY;
 -- waitlist: no RLS (server-side only via service role key)
 
 -- Policies: DROP IF EXISTS then CREATE for idempotency on PG15
@@ -155,6 +147,45 @@ CREATE POLICY "own injury flags" ON injury_flags FOR ALL USING (auth.uid() = use
 
 DROP POLICY IF EXISTS "own false positives" ON hc2_false_positives;
 CREATE POLICY "own false positives" ON hc2_false_positives FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own adaptation queue" ON adaptation_queue;
+CREATE POLICY "own adaptation queue" ON adaptation_queue FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own plan generation queue" ON plan_generation_queue;
+CREATE POLICY "own plan generation queue" ON plan_generation_queue FOR ALL USING (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────
+-- Storage — session screenshots bucket
+-- ─────────────────────────────────────────────
+
+-- Create the bucket (private — no public URLs)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('session-screenshots', 'session-screenshots', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- Users can upload files into their own folder: session-screenshots/{userId}/...
+DROP POLICY IF EXISTS "own screenshots upload" ON storage.objects;
+CREATE POLICY "own screenshots upload" ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id = 'session-screenshots'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- Users can read files from their own folder
+DROP POLICY IF EXISTS "own screenshots read" ON storage.objects;
+CREATE POLICY "own screenshots read" ON storage.objects
+  FOR SELECT USING (
+    bucket_id = 'session-screenshots'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+-- Users can delete their own screenshots
+DROP POLICY IF EXISTS "own screenshots delete" ON storage.objects;
+CREATE POLICY "own screenshots delete" ON storage.objects
+  FOR DELETE USING (
+    bucket_id = 'session-screenshots'
+    AND auth.uid()::text = (storage.foldername(name))[1]
+  );
 
 -- ─────────────────────────────────────────────
 -- Auto-create profile on signup
