@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 4 — April 2026  
-**Next session:** Session 5 — Session logging (manual + screenshot)
+**Last completed session:** Session 5 — April 2026  
+**Next session:** Session 6 — Strava integration (webhook registration, UI polish)
 
 ---
 
@@ -32,9 +32,14 @@ arcline/
       layout.tsx                  ← /app/* shell layout + AppNav
       onboarding/page.tsx         ← /app/onboarding
       dashboard/page.tsx          ← /app/dashboard (current week PlanWeekView)
-      log/page.tsx                ← /app/log (shell — Session 5)
+      log/
+        page.tsx                  ← /app/log (real — Session 5)
+        _components/
+          LogTabs.tsx             ← Manual / Screenshot tab switcher
+          ManualLogForm.tsx       ← method 1: form with HC2 + save
+          ScreenshotLogForm.tsx   ← method 2: upload → extract → confirm
       plan/page.tsx               ← /app/plan (all-weeks PlanWeekView)
-      settings/integrations/page.tsx ← /app/settings/integrations (shell — Session 6)
+      settings/integrations/page.tsx ← Strava connect/disconnect UI
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
     layout.tsx                    ← root layout (Geist font, metadata)
@@ -47,10 +52,21 @@ arcline/
     WeeklyRing.tsx                ← STUB (Session 8)
   lib/
     auth/actions.ts               ← signUp / login / logout server actions
+    ai/
+      detectInjury.ts             ← HC2 classifier (haiku)
+      generatePlan.ts             ← AI plan generation (sonnet) + HC1 enforcement
+      generateFallbackPlan.ts     ← stub plan generator (is_fallback=true)
+      triggerAdaptation.ts        ← stub (Session 7 fills in real engine)
+    sessions/
+      actions.ts                  ← checkSessionInjury, logManualSession, extractScreenshot, confirmSession, disconnectStrava
+      save.ts                     ← saveSessionAndTriggerAdaptation (shared across all 3 log methods)
+    strava/
+      client.ts                   ← exchangeToken, getActivity, getAthleteActivities, mapStravaToSession, retry logic
     supabase/
       client.ts                   ← createBrowserClient wrapper
       middleware.ts               ← updateSession utility (used by proxy.ts)
       server.ts                   ← createServerClient wrapper (async, awaits cookies())
+      service.ts                  ← createServiceClient (service role key, for webhook handler)
   store/arclineStore.ts           ← Zustand store (exact master prompt interface)
   supabase/schema.sql             ← full DDL — run once in Supabase SQL editor
   types/index.ts                  ← Profile, Plan, PlanWeek, PlanSession, TrainingSession
@@ -62,7 +78,9 @@ components/
 ```
 
 ### What is NOT built yet
-- Session logging (manual + screenshot) — Session 5
+- Adaptation engine (AI plan rebuild after each session) — Session 7
+- Gamification UX (replaces stubs) — Session 8
+- Dogfood cycle — Session 10
 - Strava integration — Session 6
 - Adaptation engine + HC1 — Session 7
 - Schedule-change adaptation — Session 7/8
@@ -140,6 +158,43 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 5 — April 2026
+**Completed:**
+- `lib/sessions/save.ts` — `saveSessionAndTriggerAdaptation`: atomic insert, fire-and-forget `triggerAdaptationAsync`, inserts to `adaptation_queue` on trigger failure.
+- `lib/ai/triggerAdaptation.ts` — stub. TODO [Session 7]: real adaptation engine.
+- `lib/sessions/actions.ts` — server actions:
+  - `checkSessionInjury(text)`: detectInjury + writes injury_flags + pauses active plan if injured
+  - `logManualSession(data)`: validates + `saveSessionAndTriggerAdaptation`
+  - `extractScreenshot(formData)`: uploads to Supabase Storage, extracts via Claude vision (claude-sonnet-4-6), returns `ExtractedSession` with confidence level
+  - `confirmSession(data)`: HC2 on notes + `saveSessionAndTriggerAdaptation`
+  - `disconnectStrava()`: clears strava_token + strava_connected, redirects
+- `lib/strava/client.ts` — `exchangeToken`, `getActivity`, `getAthleteActivities`, `mapStravaToSession`. `refreshIfNeeded` handles token expiry. `fetchWithRetry` implements exponential backoff on 429 (1s, 2s, 4s, 8s, max 4 retries).
+- `lib/supabase/service.ts` — service role client for use in webhook (no user cookie context).
+- `app/app/log/_components/ManualLogForm.tsx` — all fields. Session type changes pace label/placeholder. Power field gated to bike. HC2 triggered before save, `InjuryReferralScreen` overlay, save proceeds after dismiss.
+- `app/app/log/_components/ScreenshotLogForm.tsx` — file validation (JPEG/PNG, 10MB) before upload. Two-step: upload+extract, then confirmation form. Low-confidence yellow banner. HC2 on confirmed notes.
+- `app/app/log/_components/LogTabs.tsx` — Manual / Screenshot tab strip.
+- `app/app/log/page.tsx` — auth guard + LogTabs.
+- `app/app/settings/integrations/page.tsx` — Strava card: unconfigured / not connected / connected states. Disconnect via form action.
+- `app/api/strava/auth/route.ts` — redirects to Strava OAuth. Redirect URI built from `NEXT_PUBLIC_APP_URL`.
+- `app/api/strava/callback/route.ts` — code exchange, token storage, last-10 activity import with deduplication + HC2 per activity.
+- `app/api/strava/webhook/route.ts` — GET verify handshake, POST new activity: lookup user by `strava_token->>athlete_id`, dedup, HC2, `saveSessionAndTriggerAdaptation`.
+- `supabase/schema.sql` — `adaptation_queue` table added.
+- `types/index.ts` — `SessionType` expanded with `open_water`, `race`. `NewSession` type added.
+
+**Decisions not in prompt:**
+- Webhook uses `createServiceClient()` (service role key) — Strava's POST has no user cookie, RLS would block all queries with the anon client.
+- Webhook athlete_id lookup: `.filter('strava_token->>athlete_id', 'eq', String(owner_id))` — PostgREST JSONB text extraction operator.
+- Screenshot extraction uses `claude-sonnet-4-6` (not `claude-sonnet-4-20250514` from master prompt — that model ID is not in the current model list).
+- `disconnectStrava` returns `void` + redirects (not `{ error? }`) — required for `<form action>` compatibility.
+- Strava bulk import (callback) skips adaptation trigger per activity — just saves. Ongoing webhook events use `saveSessionAndTriggerAdaptation`.
+- Webhook HC2 pauses the active plan when injury detected; bulk import does not (too disruptive for historical data).
+
+**Requires manual Supabase setup:**
+- Create `session-screenshots` storage bucket. Set RLS: allow users to upload/read their own folder (`auth.uid()::text = (storage.foldername(name))[1]`).
+- Run `adaptation_queue` table SQL from schema.sql in SQL editor.
+- Add env vars: `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN`, `NEXT_PUBLIC_APP_URL`.
+- Register redirect URIs in Strava Developer Portal: `http://localhost:3000/api/strava/callback` and `[APP_URL]/api/strava/callback`.
 
 ### Session 4 — April 2026
 **Completed:**
