@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 3 — April 2026  
-**Next session:** Session 4 — Plan generation + dashboard
+**Last completed session:** Session 4 — April 2026  
+**Next session:** Session 5 — Session logging (manual + screenshot)
 
 ---
 
@@ -27,11 +27,13 @@ arcline/
       EmailCapture.tsx            ← landing page email capture
     api/waitlist/route.ts         ← POST /api/waitlist (persists to Supabase if configured)
     app/
-      layout.tsx                  ← /app/* shell layout
-      onboarding/page.tsx         ← /app/onboarding (shell — Session 3)
-      dashboard/page.tsx          ← /app/dashboard (shell — Session 4)
+      _components/
+        AppNav.tsx                ← sticky bottom nav (Dashboard / Plan / Log)
+      layout.tsx                  ← /app/* shell layout + AppNav
+      onboarding/page.tsx         ← /app/onboarding
+      dashboard/page.tsx          ← /app/dashboard (current week PlanWeekView)
       log/page.tsx                ← /app/log (shell — Session 5)
-      plan/page.tsx               ← /app/plan (shell — Session 4)
+      plan/page.tsx               ← /app/plan (all-weeks PlanWeekView)
       settings/integrations/page.tsx ← /app/settings/integrations (shell — Session 6)
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
@@ -54,10 +56,12 @@ arcline/
   types/index.ts                  ← Profile, Plan, PlanWeek, PlanSession, TrainingSession
   proxy.ts                        ← session refresh + /app/* auth protection
   .env.local                      ← real keys needed (gitignored)
+components/
+  PlanWeekView.tsx                ← horizontal-scroll session card strip
+  InjuryReferralScreen.tsx        ← HC2 referral overlay (Session 3)
 ```
 
 ### What is NOT built yet
-- Plan generation + dashboard — Session 4
 - Session logging (manual + screenshot) — Session 5
 - Strava integration — Session 6
 - Adaptation engine + HC1 — Session 7
@@ -136,6 +140,33 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 4 — April 2026
+**Completed:**
+- `lib/ai/generatePlan.ts` — real AI plan generation via claude-sonnet-4-6. 2-attempt retry with JSON parse validation. Falls back to `generateFallbackPlan` on both failures. HC1 enforced after parsing: each week capped at 115% of previous week's load (duration_min × intensity_multiplier), sessions scaled proportionally if over ceiling.
+- `lib/onboarding/actions.ts` updated — calls `generatePlan` (async). On success: inserts plan to DB. If `is_fallback=true`: also inserts to `plan_generation_queue` (silently ignored if table doesn't exist yet).
+- `supabase/schema.sql` — `plan_generation_queue` table added. **Run separately in Supabase SQL editor** (existing schema already applied).
+- `types/index.ts` — `PlanSession` extended with optional `date`, `intensity_multiplier`, `completed`. `PlanWeek` extended with optional `week_start`. Backwards-compatible (fallback generator still works).
+- `components/PlanWeekView.tsx` — server component. Horizontal-scroll strip of session cards. Type badge (colour-coded per discipline), day abbreviation, formatted duration, intensity badge, 2-3 line description truncated, "Log this session" CTA linking to /app/log.
+- `app/app/_components/AppNav.tsx` — client component. Sticky bottom nav. Active route highlighted in brand-teal.
+- `app/app/layout.tsx` — AppNav added.
+- `app/app/dashboard/page.tsx` — server component. Loads active plan, computes current week from `week_start` dates (falls back to `generated_at` + elapsed weeks). Renders `PlanWeekView` for current week. Fallback banner when `is_fallback=true`. All 5 gamification stubs imported.
+- `app/app/plan/page.tsx` — server component. All weeks rendered with `PlanWeekView`. Training duration per week displayed.
+- `eslint.config.mjs` — `argsIgnorePattern: "^_"` added. Pre-existing `<a>` navigation lint errors fixed (auth layout, OnboardingFlow).
+
+**Deferred:**
+- Background plan regeneration worker (plan_generation_queue is inserted to but nothing processes it yet)
+- Strava integration — Session 6
+
+**Decisions not in prompt:**
+- HC1 enforcement in `generatePlan` happens after parsing, before returning — AI output is never trusted raw. `enforceHC1` uses actual load calculation (duration × multiplier per session), not the AI-reported `total_load_minutes`.
+- `getWeekStart()`: if today is Monday → plan starts today. Otherwise → next Monday. Avoids starting mid-week.
+- `plan_generation_queue` insert wrapped in no-error-check pattern — table may not exist until user runs the new SQL. Onboarding completion must not fail because of this.
+- `PlanWeekView` is a server component (no hooks, no browser APIs). `AppNav` is client-only (needs `usePathname`).
+- JSON parse strips markdown fences before parsing (`replace(/^```(?:json)?\n?/...)`) to handle models that wrap JSON despite being told not to.
+
+**Technical debt deliberately introduced:**
+- `plan_generation_queue` rows are never processed — background worker is a Session 7+ concern
 
 ### Session 3 — April 2026
 **Completed:**
