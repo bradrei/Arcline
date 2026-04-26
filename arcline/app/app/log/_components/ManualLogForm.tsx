@@ -45,6 +45,8 @@ const FIELD = 'rounded-xl border border-white/10 bg-surface px-4 py-3 text-foreg
 
 export function ManualLogForm() {
   const setInjuryFlagged = useArclineStore(s => s.setInjuryFlagged)
+  const triggerSessionComplete = useArclineStore(s => s.triggerSessionComplete)
+  const setAdaptationPending = useArclineStore(s => s.setAdaptationPending)
 
   const [sessionType, setSessionType] = useState<SessionType>('run')
   const [sessionDate, setSessionDate] = useState(today())
@@ -109,6 +111,12 @@ export function ManualLogForm() {
       setError(result.error)
     } else {
       setSuccess(true)
+      triggerSessionComplete({
+        duration_min: data.duration_min,
+        distance_km: data.distance_km,
+        rpe: data.rpe,
+      })
+      setAdaptationPending(true)
     }
   }
 

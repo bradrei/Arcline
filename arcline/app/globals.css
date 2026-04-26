@@ -24,3 +24,29 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Session complete animation — CSS-only particles */
+@keyframes particle-fly {
+  0%   { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: var(--tx, 0) var(--ty, -80px) scale(0); opacity: 0; }
+}
+.particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand-teal);
+  animation: particle-fly 0.7s ease-out forwards;
+}
+.particle:nth-child(1)  { --tx: translateX(-60px); --ty: translateY(-70px); animation-delay: 0s; }
+.particle:nth-child(2)  { --tx: translateX(60px);  --ty: translateY(-70px); animation-delay: 0.04s; }
+.particle:nth-child(3)  { --tx: translateX(-80px); --ty: translateY(-20px); animation-delay: 0.08s; }
+.particle:nth-child(4)  { --tx: translateX(80px);  --ty: translateY(-20px); animation-delay: 0.08s; }
+.particle:nth-child(5)  { --tx: translateX(-50px); --ty: translateY(50px);  animation-delay: 0.05s; background: #FFD700; }
+.particle:nth-child(6)  { --tx: translateX(50px);  --ty: translateY(50px);  animation-delay: 0.05s; background: #FFD700; }
+.particle:nth-child(7)  { --tx: translateX(0);     --ty: translateY(-90px); animation-delay: 0.02s; width: 6px; height: 6px; }
+.particle:nth-child(8)  { --tx: translateX(-30px); --ty: translateY(70px);  animation-delay: 0.1s;  width: 6px; height: 6px; background: #FFD700; }
+.particle:nth-child(9)  { --tx: translateX(30px);  --ty: translateY(70px);  animation-delay: 0.1s;  width: 6px; height: 6px; }
+.particle:nth-child(10) { --tx: translateX(90px);  --ty: translateY(-40px); animation-delay: 0.03s; width: 5px; height: 5px; }
+.particle:nth-child(11) { --tx: translateX(-90px); --ty: translateY(-40px); animation-delay: 0.03s; width: 5px; height: 5px; background: #FFD700; }
+.particle:nth-child(12) { --tx: translateX(20px);  --ty: translateY(-100px); animation-delay: 0.06s; width: 5px; height: 5px; }

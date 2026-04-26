@@ -43,6 +43,8 @@ function extractedToFormState(e: ExtractedSession): ConfirmFormState {
 
 export function ScreenshotLogForm() {
   const setInjuryFlagged = useArclineStore(s => s.setInjuryFlagged)
+  const triggerSessionComplete = useArclineStore(s => s.triggerSessionComplete)
+  const setAdaptationPending = useArclineStore(s => s.setAdaptationPending)
 
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileError, setFileError] = useState<string | null>(null)
@@ -145,6 +147,12 @@ export function ScreenshotLogForm() {
       setSaveError(result.error)
     } else {
       setSuccess(true)
+      triggerSessionComplete({
+        duration_min: Number(confirmForm?.duration_min ?? 0),
+        distance_km: confirmForm?.distance_km ? Number(confirmForm.distance_km) : null,
+        rpe: null,
+      })
+      setAdaptationPending(true)
     }
   }
 

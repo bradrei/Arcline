@@ -16,6 +16,7 @@ interface ArclineStore {
   activePlan: Plan | null
   setActivePlan: (plan: Plan | null) => void
   adaptationPending: boolean
+  adaptationPendingSince: number | null
   setAdaptationPending: (pending: boolean) => void
 
   // Sessions
@@ -27,6 +28,12 @@ interface ArclineStore {
   setStreak: (streak: number) => void
   weeklyCompletionPercent: number
   setWeeklyCompletionPercent: (pct: number) => void
+
+  // Session complete animation
+  showSessionComplete: boolean
+  sessionCompleteData: { duration_min: number; distance_km: number | null; rpe: number | null } | null
+  triggerSessionComplete: (data: { duration_min: number; distance_km: number | null; rpe: number | null }) => void
+  dismissSessionComplete: () => void
 
   // Safety
   injuryFlagged: boolean
@@ -57,7 +64,11 @@ export const useArclineStore = create<ArclineStore>((set) => ({
   activePlan: null,
   setActivePlan: (activePlan) => set({ activePlan }),
   adaptationPending: false,
-  setAdaptationPending: (adaptationPending) => set({ adaptationPending }),
+  adaptationPendingSince: null,
+  setAdaptationPending: (pending) =>
+    pending
+      ? set({ adaptationPending: true, adaptationPendingSince: Date.now() })
+      : set({ adaptationPending: false, adaptationPendingSince: null }),
 
   currentWeekSessions: [],
   setCurrentWeekSessions: (currentWeekSessions) => set({ currentWeekSessions }),
@@ -66,6 +77,11 @@ export const useArclineStore = create<ArclineStore>((set) => ({
   setStreak: (streak) => set({ streak }),
   weeklyCompletionPercent: 0,
   setWeeklyCompletionPercent: (weeklyCompletionPercent) => set({ weeklyCompletionPercent }),
+
+  showSessionComplete: false,
+  sessionCompleteData: null,
+  triggerSessionComplete: (data) => set({ showSessionComplete: true, sessionCompleteData: data }),
+  dismissSessionComplete: () => set({ showSessionComplete: false, sessionCompleteData: null }),
 
   injuryFlagged: false,
   injuryTriggerText: '',

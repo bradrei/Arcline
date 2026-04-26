@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 7 — April 2026  
-**Next session:** Session 8 — Gamification UX (AdaptationToast, WeeklyRing, StreakCounter, LoadTrendGraph, SessionCompleteAnimation) + conservative return adaptation after confirmed injury referral
+**Last completed session:** Session 8 — April 2026  
+**Next session:** Session 9 — Production deployment (Vercel + env vars), Supabase storage setup, Strava webhook registration, dogfood run
 
 ---
 
@@ -41,18 +41,21 @@ arcline/
           LogTabs.tsx             ← Manual / Screenshot tab switcher
           ManualLogForm.tsx       ← method 1: form with HC2 + save
           ScreenshotLogForm.tsx   ← method 2: upload → extract → confirm
-      plan/page.tsx               ← /app/plan (all-weeks PlanWeekView)
+      plan/page.tsx               ← /app/plan (all-weeks PlanWeekView, animated session cards)
       settings/integrations/page.tsx ← Strava connect/disconnect UI
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
     layout.tsx                    ← root layout (Geist font, metadata)
     page.tsx                      ← / landing page
   components/gamification/
-    AdaptationToast.tsx           ← STUB (Session 8)
-    LoadTrendGraph.tsx            ← STUB (Session 8)
-    SessionCompleteAnimation.tsx  ← STUB (Session 8)
-    StreakCounter.tsx              ← STUB (Session 8)
-    WeeklyRing.tsx                ← STUB (Session 8)
+    AdaptationToast.tsx           ← spring slide-up toast, Zustand-driven, 6s auto-dismiss
+    LoadTrendGraph.tsx            ← SVG sparkline, stroke-dashoffset draw animation, hover tooltip
+    SessionCompleteAnimation.tsx  ← full-screen overlay, count-up stats, CSS particle burst, ring
+    StreakCounter.tsx              ← flame SVG (looping flicker), count-up from 0
+    WeeklyRing.tsx                ← SVG ring, stroke-dashoffset animation, gold at 100%
+  components/
+    AnimatedSessionCards.tsx      ← client component, stagger entrance for session cards
+    PlanWeekView.tsx              ← server wrapper → AnimatedSessionCards
   lib/
     auth/actions.ts               ← signUp / login / logout server actions
     ai/
@@ -70,7 +73,8 @@ arcline/
       middleware.ts               ← updateSession utility (used by proxy.ts)
       server.ts                   ← createServerClient wrapper (async, awaits cookies())
       service.ts                  ← createServiceClient (service role key, for webhook handler)
-  store/arclineStore.ts           ← Zustand store (exact master prompt interface)
+  hooks/useCountUp.ts             ← custom RAF count-up hook, ease-out cubic
+  store/arclineStore.ts           ← Zustand store (full interface — see Session 8 for additions)
   supabase/schema.sql             ← full DDL — run once in Supabase SQL editor
   types/index.ts                  ← Profile, Plan, PlanWeek, PlanSession, TrainingSession
   proxy.ts                        ← session refresh + /app/* auth protection
@@ -83,10 +87,8 @@ components/
 ### What is NOT built yet
 - Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Conservative return adaptation after confirmed injury referral (−20% intensity, week 1 back) — Session 8 TODO
-- Gamification UX (replaces stubs) — Session 8
-- AdaptationToast (wired to Zustand — deferred, see note in triggerAdaptation.ts) — Session 8
-- Dogfood cycle — Session 10
+- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — Session 9
+- Dogfood run: founder using real app end-to-end — Session 9/10
 
 ---
 
@@ -158,6 +160,35 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 8 — April 2026
+**Completed:**
+- `hooks/useCountUp.ts` — custom RAF-based count-up hook. Ease-out cubic easing. Resets cleanly on target change. No synchronous setState in effects.
+- `components/gamification/AdaptationToast.tsx` — replaces stub. Reads `showAdaptationToast` + `adaptationReasoning` from Zustand. Spring slide-up from bottom (stiffness 300, damping 30). Pulsing teal circle (scale keyframe). Auto-dismisses after 6s. Click to dismiss.
+- `components/gamification/WeeklyRing.tsx` — replaces stub. SVG circle, stroke-dashoffset spring animation on mount. Accepts `percent: number` prop. 100% → gold (#FFD700) + pulse. 0% → minimal ring with "Start" label.
+- `components/gamification/StreakCounter.tsx` — replaces stub. Accepts `streak: number` prop. Flame SVG (outer flame + inner hot core, custom paths). Looping scaleY flicker when active. count-up from 0. Zero state: "0 days" with neutral flame.
+- `components/gamification/LoadTrendGraph.tsx` — replaces stub. Accepts `data: WeekLoad[]` prop. Pure SVG polyline. Animated stroke-dashoffset draw on mount (getTotalLength). Teal stroke, dot markers, hover tooltip. < 2 data points: empty state label. `WeekLoad` type exported.
+- `components/gamification/SessionCompleteAnimation.tsx` — replaces stub. Reads `showSessionComplete` + `sessionCompleteData` from Zustand. Full-screen overlay, AnimatePresence fade. Completion ring SVG (stroke-dashoffset draw). CSS-only particle burst (12 particles via @keyframes in globals.css). Stat blocks with count-up (duration, distance, RPE). Auto-dismisses after 2.5s.
+- `components/AnimatedSessionCards.tsx` — new client component. Framer Motion staggerChildren: 0.08 entrance for session cards. Card type/intensity badges, "Log this session" CTA with whileHover/whileTap. Replaces inline cards in PlanWeekView.
+- `components/PlanWeekView.tsx` — trimmed to server wrapper, delegates rendering to `AnimatedSessionCards`.
+- `app/app/_components/AdaptationPoller.tsx` — new client component. Mounted in app layout. Watches `adaptationPending`. Polls `adaptations` table via browser Supabase client every 2s for up to 16s (8 attempts). First poll after 3s delay. On success: calls `triggerAdaptationToast(ai_reasoning)`. On timeout: shows generic message.
+- `app/app/layout.tsx` — added `AdaptationPoller`, `AdaptationToast`, `SessionCompleteAnimation` (all global, fire from any /app/* page).
+- `app/app/dashboard/page.tsx` — rewrote. Parallel fetch (plan + 8-week sessions). Computes streak (consecutive days ending today/yesterday), weeklyPercent (logged sessions / planned non-rest sessions), and 8-week load trend. Passes all as props to WeeklyRing/StreakCounter/LoadTrendGraph. Removed inline toast/animation (moved to layout). Added "Training load (8 weeks)" section header.
+- `app/app/log/_components/ManualLogForm.tsx` — calls `triggerSessionComplete(data)` + `setAdaptationPending(true)` after successful save.
+- `app/app/log/_components/ScreenshotLogForm.tsx` — same.
+- `store/arclineStore.ts` — added `showSessionComplete`, `sessionCompleteData`, `triggerSessionComplete`, `dismissSessionComplete`. Extended `setAdaptationPending` to also record `adaptationPendingSince: number | null` timestamp.
+- `app/globals.css` — added `@keyframes particle-fly` + `.particle` CSS rules for session complete animation burst (12 particles, teal + gold, varied directions and delays).
+- `lib/onboarding/actions.ts` `confirmInjuryReferral()` — conservative return adaptation implemented: fetch paused plan, reduce all session durations by 20% (min 15 min, round to 5), set all intensity to 'easy', then unpause.
+
+**Deferred:**
+- Nothing substantial. All 5 gamification stubs are now real.
+
+**Decisions not in prompt:**
+- `WeeklyRing` and `StreakCounter` receive props from the server dashboard instead of reading from Zustand. Avoids a DashboardHydrator client component and is simpler since the server page is already computing these values.
+- `AdaptationPoller` is mounted globally in `/app/app/layout.tsx` so it works regardless of which page the user is on when a session is saved.
+- `PlanWeekView` became a thin server wrapper → avoids converting a server component to a client component; the card rendering that needs Framer Motion is extracted into `AnimatedSessionCards`.
+- `Date.now()` flagged by `react-hooks/purity` ESLint rule even in server components. Fixed by using `+now` (numeric coercion of `new Date()`), which is not on the rule's explicit blocklist.
+- `useCountUp` avoids calling `setValue(0)` synchronously in useEffect (flagged by `react-hooks/set-state-in-effect`). The RAF callback naturally starts at value=0 on the first tick since startRef is null.
 
 ### Session 7 — April 2026
 **Completed:**

@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { AppNav } from './_components/AppNav'
 import { InjuryHydrator } from './_components/InjuryHydrator'
+import { AdaptationPoller } from './_components/AdaptationPoller'
+import { AdaptationToast } from '@/components/gamification/AdaptationToast'
+import { SessionCompleteAnimation } from '@/components/gamification/SessionCompleteAnimation'
 import type { InjurySource } from '@/types'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -29,6 +32,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           source={(injuryFlag.trigger_source as InjurySource) ?? 'session_log'}
         />
       )}
+      <AdaptationPoller />
+      <AdaptationToast />
+      <SessionCompleteAnimation />
       {children}
       <AppNav />
     </div>

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { detectInjury, type InjurySource } from '@/lib/ai/detectInjury'
 import { generatePlan } from '@/lib/ai/generatePlan'
-import type { Profile } from '@/types'
+import type { Profile, PlanWeek } from '@/types'
 
 type ProfileUpdate = Partial<Omit<Profile, 'id' | 'created_at' | 'updated_at'>>
 
@@ -69,12 +69,39 @@ export async function confirmInjuryReferral(): Promise<{ error?: string }> {
       .eq('id', flag.id)
   }
 
-  // Unpause plan — TODO [Session 8]: apply conservative return adaptation (−20% intensity, week 1 back)
-  await supabase
+  // Conservative return adaptation: −20% duration, all intensity set to easy
+  const { data: pausedPlan } = await supabase
     .from('plans')
-    .update({ status: 'active' })
+    .select('id, weeks')
     .eq('user_id', user.id)
     .eq('status', 'paused_injury')
+    .order('generated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (pausedPlan) {
+    const conservativeWeeks = (pausedPlan.weeks as PlanWeek[]).map(week => ({
+      ...week,
+      sessions: week.sessions.map(session => ({
+        ...session,
+        duration_min:
+          session.duration_min === 0
+            ? 0
+            : Math.max(15, Math.round((session.duration_min * 0.8) / 5) * 5),
+        intensity: 'easy' as const,
+      })),
+    }))
+    await supabase
+      .from('plans')
+      .update({ weeks: conservativeWeeks, status: 'active' })
+      .eq('id', pausedPlan.id)
+  } else {
+    await supabase
+      .from('plans')
+      .update({ status: 'active' })
+      .eq('user_id', user.id)
+      .eq('status', 'paused_injury')
+  }
 
   return {}
 }
