@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { Profile } from '@/types'
 import { ProgressBar } from './ProgressBar'
@@ -246,9 +247,9 @@ export function OnboardingFlow({ initialProfile }: Props) {
       )}
 
       <div className="mx-auto w-full max-w-lg px-6 py-12">
-        <a href="/" className="mb-12 block text-lg font-bold tracking-tight">
+        <Link href="/" className="mb-12 block text-lg font-bold tracking-tight">
           arc<span className="text-brand-teal">line</span>
-        </a>
+        </Link>
 
         <ProgressBar current={step} total={TOTAL_STEPS} />
 

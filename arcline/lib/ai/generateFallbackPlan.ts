@@ -54,7 +54,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 // Weekly load multipliers across 4 weeks: build, build, peak, recovery
 const WEEK_MULTIPLIERS = [0.8, 0.9, 1.0, 0.7]
 
-export function generateFallbackPlan(profile: Profile, planId: string): Omit<Plan, 'id'> {
+export function generateFallbackPlan(profile: Profile, _planId: string): Omit<Plan, 'id'> {
   const daysAvail = Math.min(Math.max(profile.weekly_days_available ?? 4, 3), 7)
   const totalMinutesPerWeek = (profile.weekly_hours_available ?? 6) * 60
   const templates = SESSION_TEMPLATES[daysAvail] ?? SESSION_TEMPLATES[4]

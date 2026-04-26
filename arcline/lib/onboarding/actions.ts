@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { detectInjury, type InjurySource } from '@/lib/ai/detectInjury'
-import { generateFallbackPlan } from '@/lib/ai/generateFallbackPlan'
+import { generatePlan } from '@/lib/ai/generatePlan'
 import type { Profile } from '@/types'
 
 type ProfileUpdate = Partial<Omit<Profile, 'id' | 'created_at' | 'updated_at'>>
@@ -124,12 +124,26 @@ export async function completeOnboarding(
 
   if (fetchError || !profile) return { error: 'Could not load profile for plan generation.' }
 
-  // Generate and save fallback plan
-  // TODO [Session 4]: Replace generateFallbackPlan with AI plan generation
-  const planData = generateFallbackPlan(profile as Profile, user.id)
+  // Generate plan (AI → fallback on failure)
+  const planData = await generatePlan(profile as Profile)
 
-  const { error: planError } = await supabase.from('plans').insert(planData)
+  const { data: insertedPlan, error: planError } = await supabase
+    .from('plans')
+    .insert(planData)
+    .select('id')
+    .single()
+
   if (planError) return { error: planError.message }
+
+  // If AI generation failed and we used the fallback, queue for background regen
+  if (planData.is_fallback && insertedPlan) {
+    await supabase.from('plan_generation_queue').insert({
+      user_id: user.id,
+      plan_id: insertedPlan.id,
+      status: 'pending',
+    })
+    // Silently ignore if table doesn't exist yet
+  }
 
   redirect('/app/dashboard')
 }

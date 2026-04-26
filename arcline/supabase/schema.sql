@@ -107,6 +107,15 @@ CREATE TABLE IF NOT EXISTS waitlist (
   created_at timestamptz DEFAULT now()
 );
 
+-- Added Session 4: queue for background AI plan regeneration when fallback was used
+CREATE TABLE IF NOT EXISTS plan_generation_queue (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  plan_id uuid REFERENCES plans(id) ON DELETE CASCADE,
+  status text DEFAULT 'pending', -- 'pending' | 'processing' | 'done' | 'failed'
+  created_at timestamptz DEFAULT now()
+);
+
 -- ─────────────────────────────────────────────
 -- Row Level Security
 -- ─────────────────────────────────────────────

@@ -27,16 +27,20 @@ export type Intensity = 'easy' | 'moderate' | 'hard' | 'race_pace'
 
 export interface PlanSession {
   day: string
+  date?: string
   type: SessionType
   duration_min: number
   intensity: Intensity
+  intensity_multiplier?: number
   description: string
   target_pace?: string
   target_hr_zone?: number
+  completed?: boolean
 }
 
 export interface PlanWeek {
   week_number: number
+  week_start?: string
   sessions: PlanSession[]
   total_load_minutes?: number
 }
