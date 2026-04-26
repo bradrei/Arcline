@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { InjuryReferralScreen } from '@/components/InjuryReferralScreen'
+import { useArclineStore } from '@/store/arclineStore'
 import {
   checkSessionInjury,
   confirmSession,
@@ -42,6 +42,8 @@ function extractedToFormState(e: ExtractedSession): ConfirmFormState {
 }
 
 export function ScreenshotLogForm() {
+  const setInjuryFlagged = useArclineStore(s => s.setInjuryFlagged)
+
   const fileRef = useRef<HTMLInputElement>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [isExtracting, setIsExtracting] = useState(false)
@@ -51,10 +53,6 @@ export function ScreenshotLogForm() {
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [injuryState, setInjuryState] = useState<{ show: boolean; triggerText: string }>({
-    show: false,
-    triggerText: '',
-  })
 
   function validateFile(file: File): string | null {
     if (!['image/jpeg', 'image/png'].includes(file.type)) {
@@ -117,7 +115,7 @@ export function ScreenshotLogForm() {
     if (confirmForm.notes.trim()) {
       const { injured, triggerText } = await checkSessionInjury(confirmForm.notes)
       if (injured) {
-        setInjuryState({ show: true, triggerText })
+        setInjuryFlagged(true, triggerText, 'screenshot', () => doConfirmSave())
         return
       }
     }
@@ -150,11 +148,6 @@ export function ScreenshotLogForm() {
     }
   }
 
-  async function handleInjuryDismiss() {
-    setInjuryState({ show: false, triggerText: '' })
-    await doConfirmSave()
-  }
-
   if (success) {
     return (
       <div className="flex flex-col items-center gap-4 py-12 text-center">
@@ -179,14 +172,6 @@ export function ScreenshotLogForm() {
 
   return (
     <>
-      {injuryState.show && (
-        <InjuryReferralScreen
-          triggerText={injuryState.triggerText}
-          source="screenshot"
-          onDismiss={handleInjuryDismiss}
-        />
-      )}
-
       {/* Step 1: Upload */}
       {!confirmForm && (
         <div className="flex flex-col gap-5">

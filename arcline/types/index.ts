@@ -1,5 +1,7 @@
 export type { User } from '@supabase/supabase-js'
 
+export type InjurySource = 'session_log' | 'notes' | 'screenshot' | 'onboarding'
+
 export interface Profile {
   id: string
   age: number | null

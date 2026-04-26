@@ -69,6 +69,13 @@ export async function confirmInjuryReferral(): Promise<{ error?: string }> {
       .eq('id', flag.id)
   }
 
+  // Unpause plan — TODO [Session 8]: apply conservative return adaptation (−20% intensity, week 1 back)
+  await supabase
+    .from('plans')
+    .update({ status: 'active' })
+    .eq('user_id', user.id)
+    .eq('status', 'paused_injury')
+
   return {}
 }
 
@@ -86,12 +93,19 @@ export async function dismissInjuryAsFalsePositive(
     source,
   })
 
-  // Resolve the outstanding flag if one exists
-  await supabase
-    .from('injury_flags')
-    .update({ resolved: true })
-    .eq('user_id', user.id)
-    .eq('referral_confirmed', false)
+  // Resolve the outstanding flag and unpause plan
+  await Promise.all([
+    supabase
+      .from('injury_flags')
+      .update({ resolved: true })
+      .eq('user_id', user.id)
+      .eq('referral_confirmed', false),
+    supabase
+      .from('plans')
+      .update({ status: 'active' })
+      .eq('user_id', user.id)
+      .eq('status', 'paused_injury'),
+  ])
 
   return {}
 }

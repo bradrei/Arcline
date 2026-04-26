@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 6 — April 2026  
-**Next session:** Session 7 — Adaptation queue processor + schedule-change triggers (missed/reduced/extended/added)
+**Last completed session:** Session 7 — April 2026  
+**Next session:** Session 8 — Gamification UX (AdaptationToast, WeeklyRing, StreakCounter, LoadTrendGraph, SessionCompleteAnimation) + conservative return adaptation after confirmed injury referral
 
 ---
 
@@ -26,9 +26,12 @@ arcline/
     _components/
       EmailCapture.tsx            ← landing page email capture
     api/waitlist/route.ts         ← POST /api/waitlist (persists to Supabase if configured)
+    _components/
+      InjuryGuard.tsx             ← global HC2 overlay, watches Zustand injuryFlagged
     app/
       _components/
         AppNav.tsx                ← sticky bottom nav (Dashboard / Plan / Log)
+        InjuryHydrator.tsx        ← client component, hydrates Zustand from server-detected injury flags
       layout.tsx                  ← /app/* shell layout + AppNav
       onboarding/page.tsx         ← /app/onboarding
       dashboard/page.tsx          ← /app/dashboard (current week PlanWeekView)
@@ -78,8 +81,9 @@ components/
 ```
 
 ### What is NOT built yet
-- Adaptation queue processor (adaptation_queue rows written, never consumed) — Session 7
-- Schedule-change trigger exposure (missed/reduced/extended/added) — Session 7
+- Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
+- Schedule-change trigger exposure (missed/reduced/extended/added) — future session
+- Conservative return adaptation after confirmed injury referral (−20% intensity, week 1 back) — Session 8 TODO
 - Gamification UX (replaces stubs) — Session 8
 - AdaptationToast (wired to Zustand — deferred, see note in triggerAdaptation.ts) — Session 8
 - Dogfood cycle — Session 10
@@ -154,6 +158,29 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 7 — April 2026
+**Completed:**
+- `InjurySource` type moved to `@/types` — `detectInjury.ts` re-exports it; `InjuryReferralScreen` and store now import from `@/types` to avoid client importing from a `'use server'` module.
+- `store/arclineStore.ts` — Safety section extended: `injuryTriggerText: string`, `injurySource: InjurySource | null`, `injuryOnResolve: (() => void) | null`. `setInjuryFlagged` signature extended to `(flagged, triggerText?, source?, onResolve?)`. Clears all injury state on `setInjuryFlagged(false)`.
+- `app/_components/InjuryGuard.tsx` — new global client component. Reads `injuryFlagged` from store. When true, renders `<InjuryReferralScreen />`. `onDismiss` calls `setInjuryFlagged(false)` then `injuryOnResolve?.()`. Handles the pending-callback pattern so forms can save after referral.
+- `app/layout.tsx` (root) — `<InjuryGuard />` added inside body. Screen can now fire from any page.
+- `app/app/_components/InjuryHydrator.tsx` — new client component. Accepts `triggerText` + `source` as props. On mount, calls `setInjuryFlagged(true, ...)` to hydrate Zustand from server-side DB state.
+- `app/app/layout.tsx` — now async server component. Fetches most recent unresolved injury_flag for the user (`referral_confirmed=false`, `resolved=false`). If found, renders `<InjuryHydrator>`. This is the Strava webhook case: plan is paused server-side, user visits app → flag detected → screen fires immediately, regardless of what page they land on.
+- `app/app/log/_components/ManualLogForm.tsx` — removed local `injuryState` + `pendingData` state + inline `<InjuryReferralScreen />`. Now calls `setInjuryFlagged(true, triggerText, 'session_log', () => doSave(data))` — the global guard handles the screen and calls the callback after resolution.
+- `app/app/log/_components/ScreenshotLogForm.tsx` — same treatment. Calls `setInjuryFlagged(true, triggerText, 'screenshot', () => doConfirmSave())`.
+- `lib/onboarding/actions.ts`:
+  - `confirmInjuryReferral()` — now also unpauses plan (`status='active'`). TODO [Session 8]: apply conservative return adaptation (−20% intensity, week 1 back) before unpausing.
+  - `dismissInjuryAsFalsePositive()` — now runs flag resolution + plan unpause in parallel.
+
+**Deferred:**
+- Conservative return adaptation (−20% intensity) on confirmed referral — Session 8. Placeholder comment left in `confirmInjuryReferral`.
+
+**Decisions not in prompt:**
+- `InjurySource` had to move to `@/types` because the Zustand store (`'use client'`) cannot import from a `'use server'` module, even for type-only imports in Next.js 16.
+- `app/app/layout.tsx` now makes a Supabase DB call on every `/app/*` page render to check for unresolved injury flags. This is intentional: the Strava webhook writes the flag without any user session, so the only way to detect it is to check the DB on next page load. Query is a single indexed row lookup — negligible cost.
+- `InjuryHydrator` runs `setInjuryFlagged(true)` only once on mount (empty deps array). The layout server re-renders on each navigation and decides whether to render the hydrator based on fresh DB data. If the user resolves the flag and navigates to another page, the hydrator won't be rendered again.
+- The `injuryOnResolve` callback stored in Zustand is captured at the time the form calls `setInjuryFlagged(true, ...)`. When `InjuryGuard.onDismiss` runs, it reads the closure value before calling `setInjuryFlagged(false)` — correct execution order guaranteed by synchronous JS event handling.
 
 ### Session 6 — April 2026
 **Completed:**

@@ -2,7 +2,8 @@
 
 import Anthropic from '@anthropic-ai/sdk'
 
-export type InjurySource = 'session_log' | 'notes' | 'screenshot' | 'onboarding'
+import type { InjurySource } from '@/types'
+export type { InjurySource } from '@/types'
 
 export interface InjuryDetectionResult {
   injured: boolean

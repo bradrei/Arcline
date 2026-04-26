@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import type { User, Profile, Plan, TrainingSession } from '@/types'
+import type { User, Profile, Plan, TrainingSession, InjurySource } from '@/types'
 
 interface ArclineStore {
   // Auth
@@ -30,7 +30,15 @@ interface ArclineStore {
 
   // Safety
   injuryFlagged: boolean
-  setInjuryFlagged: (flagged: boolean) => void
+  injuryTriggerText: string
+  injurySource: InjurySource | null
+  injuryOnResolve: (() => void) | null
+  setInjuryFlagged: (
+    flagged: boolean,
+    triggerText?: string,
+    source?: InjurySource,
+    onResolve?: (() => void) | null,
+  ) => void
 
   // UI
   showAdaptationToast: boolean
@@ -60,7 +68,13 @@ export const useArclineStore = create<ArclineStore>((set) => ({
   setWeeklyCompletionPercent: (weeklyCompletionPercent) => set({ weeklyCompletionPercent }),
 
   injuryFlagged: false,
-  setInjuryFlagged: (injuryFlagged) => set({ injuryFlagged }),
+  injuryTriggerText: '',
+  injurySource: null,
+  injuryOnResolve: null,
+  setInjuryFlagged: (flagged, triggerText, source, onResolve) =>
+    flagged
+      ? set({ injuryFlagged: true, injuryTriggerText: triggerText ?? '', injurySource: source ?? null, injuryOnResolve: onResolve ?? null })
+      : set({ injuryFlagged: false, injuryTriggerText: '', injurySource: null, injuryOnResolve: null }),
 
   showAdaptationToast: false,
   adaptationReasoning: '',

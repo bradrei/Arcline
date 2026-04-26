@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { confirmInjuryReferral, dismissInjuryAsFalsePositive } from '@/lib/onboarding/actions'
-import type { InjurySource } from '@/lib/ai/detectInjury'
+import type { InjurySource } from '@/types'
 
 interface InjuryReferralScreenProps {
   triggerText: string

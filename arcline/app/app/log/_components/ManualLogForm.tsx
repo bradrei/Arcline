@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { InjuryReferralScreen } from '@/components/InjuryReferralScreen'
+import { useArclineStore } from '@/store/arclineStore'
 import {
   checkSessionInjury,
   logManualSession,
@@ -44,6 +44,8 @@ function today(): string {
 const FIELD = 'rounded-xl border border-white/10 bg-surface px-4 py-3 text-foreground placeholder:text-foreground-muted outline-none transition focus:border-brand-teal/60 focus:ring-1 focus:ring-brand-teal/40 w-full'
 
 export function ManualLogForm() {
+  const setInjuryFlagged = useArclineStore(s => s.setInjuryFlagged)
+
   const [sessionType, setSessionType] = useState<SessionType>('run')
   const [sessionDate, setSessionDate] = useState(today())
   const [durationMin, setDurationMin] = useState('')
@@ -58,11 +60,6 @@ export function ManualLogForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [injuryState, setInjuryState] = useState<{ show: boolean; triggerText: string }>({
-    show: false,
-    triggerText: '',
-  })
-  const [pendingData, setPendingData] = useState<ManualSessionInput | null>(null)
 
   function buildInput(): ManualSessionInput {
     return {
@@ -95,8 +92,7 @@ export function ManualLogForm() {
     if (notes.trim()) {
       const { injured, triggerText } = await checkSessionInjury(notes)
       if (injured) {
-        setInjuryState({ show: true, triggerText })
-        setPendingData(data)
+        setInjuryFlagged(true, triggerText, 'session_log', () => doSave(data))
         setIsLoading(false)
         return
       }
@@ -114,11 +110,6 @@ export function ManualLogForm() {
     } else {
       setSuccess(true)
     }
-  }
-
-  async function handleInjuryDismiss() {
-    setInjuryState({ show: false, triggerText: '' })
-    if (pendingData) await doSave(pendingData)
   }
 
   if (success) {
@@ -151,16 +142,7 @@ export function ManualLogForm() {
   const paceConfig = PACE_CONFIG[sessionType]
 
   return (
-    <>
-      {injuryState.show && (
-        <InjuryReferralScreen
-          triggerText={injuryState.triggerText}
-          source="session_log"
-          onDismiss={handleInjuryDismiss}
-        />
-      )}
-
-      <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
         {/* Row: date + type */}
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
@@ -325,6 +307,5 @@ export function ManualLogForm() {
           {isLoading ? 'Saving…' : 'Save session'}
         </button>
       </form>
-    </>
   )
 }
