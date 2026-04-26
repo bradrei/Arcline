@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 5 — April 2026  
-**Next session:** Session 6 — Strava integration (webhook registration, UI polish)
+**Last completed session:** Session 6 — April 2026  
+**Next session:** Session 7 — Adaptation queue processor + schedule-change triggers (missed/reduced/extended/added)
 
 ---
 
@@ -56,7 +56,7 @@ arcline/
       detectInjury.ts             ← HC2 classifier (haiku)
       generatePlan.ts             ← AI plan generation (sonnet) + HC1 enforcement
       generateFallbackPlan.ts     ← stub plan generator (is_fallback=true)
-      triggerAdaptation.ts        ← stub (Session 7 fills in real engine)
+      triggerAdaptation.ts        ← real adaptation engine (Session 6)
     sessions/
       actions.ts                  ← checkSessionInjury, logManualSession, extractScreenshot, confirmSession, disconnectStrava
       save.ts                     ← saveSessionAndTriggerAdaptation (shared across all 3 log methods)
@@ -78,14 +78,10 @@ components/
 ```
 
 ### What is NOT built yet
-- Adaptation engine (AI plan rebuild after each session) — Session 7
+- Adaptation queue processor (adaptation_queue rows written, never consumed) — Session 7
+- Schedule-change trigger exposure (missed/reduced/extended/added) — Session 7
 - Gamification UX (replaces stubs) — Session 8
-- Dogfood cycle — Session 10
-- Strava integration — Session 6
-- Adaptation engine + HC1 — Session 7
-- Schedule-change adaptation — Session 7/8
-- HC2 injury detection + referral screen — Session 9
-- Gamification UX (replaces stubs) — Session 8
+- AdaptationToast (wired to Zustand — deferred, see note in triggerAdaptation.ts) — Session 8
 - Dogfood cycle — Session 10
 
 ---
@@ -158,6 +154,29 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 6 — April 2026
+**Completed:**
+- `lib/ai/triggerAdaptation.ts` — full adaptation engine replacing stub:
+  - `triggerAdaptationAsync(supabase, userId, sessionId, triggerType)` — main entry point. Runs profile + active plan + recent sessions + current session + previous-7-day sessions in parallel.
+  - `calculateActualLoad(sessions)` — exported. Maps RPE to intensity multiplier (≤3→1.0, ≤6→1.3, ≤8→1.6, >8→1.8), sums duration_min × multiplier.
+  - `calculatePlanLoad(sessions)` — private. Uses `INTENSITY_MULTIPLIERS` against `PlanSession.intensity`.
+  - `enforceLoadCeiling(weeks, baselineLoad)` — HC1 enforcement. Caps each week at 115% of previous actual load. Scales sessions proportionally (min 15 min, rounded to 5 min). Chains forward across all weeks.
+  - `baselineLoad` fallback: if no sessions logged in past 7 days, uses first planned week's load. Absolute floor 120 weighted minutes. Prevents HC1 zeroing out a new plan.
+  - `buildTriggerContext(type, session)` — builds human-readable trigger description per `missed | reduced | extended | added | session_performance`.
+  - `callClaudeAdaptation(prompt)` — claude-sonnet-4-6, strips markdown fences, throws on parse failure.
+  - `savePlanVersion(...)` — updates plan in-place (version+1, adaptation_count+1, is_fallback=false), inserts to `adaptations` table with load_before/load_after and full plan snapshot.
+  - Injury detection path: `{ action: 'injury_detected', triggerText }` → writes `injury_flags`, sets plan `status='paused_injury'`, returns early.
+  - Zustand store updates (`setActivePlan`, `triggerAdaptationToast`) cannot run server-side — documented in code. Plan visible on next dashboard render. Toast deferred to Session 8.
+
+**Deferred:**
+- AdaptationToast Zustand integration (setActivePlan + triggerAdaptationToast) — Session 8. Note left in triggerAdaptation.ts.
+
+**Decisions not in prompt:**
+- `triggerAdaptationAsync` receives `supabase` client rather than creating its own — callers (save.ts, webhook) already have an authenticated client.
+- Baseline fallback for new users (no logged sessions): use first planned week load → prevents HC1 from zeroing all sessions.
+- Adaptation prompt includes `Today:` field — AI needs to know which sessions are "upcoming" vs completed when deciding what to rewrite.
+- HC2 injury detection is dual-path: `detectInjury()` (haiku, explicit check) runs in session logging actions; adaptation engine also checks via the Claude response shape (`action: 'injury_detected'`). Both write to injury_flags independently.
 
 ### Session 5 — April 2026
 **Completed:**
