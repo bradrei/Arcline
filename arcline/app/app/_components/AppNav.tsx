@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: '/app/dashboard', label: 'Dashboard' },
   { href: '/app/plan', label: 'Plan' },
   { href: '/app/log', label: 'Log' },
+  { href: '/app/coach', label: 'Coach' },
 ]
 
 export function AppNav() {

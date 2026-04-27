@@ -115,6 +115,18 @@ CREATE TABLE IF NOT EXISTS plan_generation_queue (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS coach_messages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  role text NOT NULL CHECK (role IN ('user', 'assistant')),
+  content text NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  injury_flagged boolean DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS coach_messages_user_created_idx
+  ON coach_messages (user_id, created_at DESC);
+
 -- ─────────────────────────────────────────────
 -- Row Level Security — public tables
 -- ─────────────────────────────────────────────
@@ -127,6 +139,7 @@ ALTER TABLE injury_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hc2_false_positives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE adaptation_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_generation_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE coach_messages ENABLE ROW LEVEL SECURITY;
 -- waitlist: no RLS (server-side only via service role key)
 
 -- Policies: DROP IF EXISTS then CREATE for idempotency on PG15
@@ -153,6 +166,9 @@ CREATE POLICY "own adaptation queue" ON adaptation_queue FOR ALL USING (auth.uid
 
 DROP POLICY IF EXISTS "own plan generation queue" ON plan_generation_queue;
 CREATE POLICY "own plan generation queue" ON plan_generation_queue FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own coach messages" ON coach_messages;
+CREATE POLICY "own coach messages" ON coach_messages FOR ALL USING (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────────
 -- Storage — session screenshots bucket

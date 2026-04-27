@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 8 — April 2026  
-**Next session:** Session 9 — Production deployment (Vercel + env vars), Supabase storage setup, Strava webhook registration, dogfood run
+**Last completed session:** Session 9 — April 2026  
+**Next session:** Session 10 — Visible adaptation reasoning + long-term plan view (phase indicator, expandable timeline)
 
 ---
 
@@ -30,11 +30,15 @@ arcline/
       InjuryGuard.tsx             ← global HC2 overlay, watches Zustand injuryFlagged
     app/
       _components/
-        AppNav.tsx                ← sticky bottom nav (Dashboard / Plan / Log)
+        AppNav.tsx                ← sticky bottom nav (Dashboard / Plan / Log / Coach)
         InjuryHydrator.tsx        ← client component, hydrates Zustand from server-detected injury flags
-      layout.tsx                  ← /app/* shell layout + AppNav
+        AdaptationPoller.tsx      ← polls adaptations table, fires AdaptationToast
+      layout.tsx                  ← /app/* shell layout + AppNav + global toasts/animations
       onboarding/page.tsx         ← /app/onboarding
       dashboard/page.tsx          ← /app/dashboard (current week PlanWeekView)
+      coach/
+        page.tsx                  ← /app/coach (server, fetches last 50 messages)
+        _components/CoachChat.tsx ← chat UI: streaming, queue, HC2-aware
       log/
         page.tsx                  ← /app/log (real — Session 5)
         _components/
@@ -43,6 +47,7 @@ arcline/
           ScreenshotLogForm.tsx   ← method 2: upload → extract → confirm
       plan/page.tsx               ← /app/plan (all-weeks PlanWeekView, animated session cards)
       settings/integrations/page.tsx ← Strava connect/disconnect UI
+    api/coach/chat/route.ts       ← POST: HC2 + rate limit + streaming Claude response
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
     layout.tsx                    ← root layout (Geist font, metadata)
@@ -87,8 +92,10 @@ components/
 ### What is NOT built yet
 - Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — Session 9
-- Dogfood run: founder using real app end-to-end — Session 9/10
+- Visible adaptation reasoning UI (every adaptation shows the user why) — Session 10
+- Long-term plan view (phase indicator, expandable timeline to goal date) — Session 10
+- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — TBD
+- Dogfood run: founder using real app end-to-end — TBD
 
 ---
 
@@ -160,6 +167,37 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 9 — April 2026
+**Completed:**
+- `app/page.tsx` — landing page nav now has "Log in" link + "Get early access" CTA pointing to `/signup`. Without these, users hitting the Vercel URL had no way into the actual app.
+- `types/index.ts` — `InjurySource` extended with `'chat'`. `CoachMessage` interface added.
+- `supabase/schema.sql` — `coach_messages` table with RLS (`auth.uid() = user_id`) and `(user_id, created_at DESC)` index. **Run separately in Supabase SQL editor.**
+- `app/api/coach/chat/route.ts` — POST streaming endpoint:
+  - Auth check, body validation (≤2000 chars).
+  - Rate limit: 30 user messages per rolling hour. Returns `{ type: 'rate_limit' }` JSON with status 429.
+  - HC2 check on every message via `detectInjury(text, 'chat')`. If injured: writes flagged user message + `injury_flags` row + pauses active plan, returns `{ type: 'injury', triggerText, message }` JSON. Coach never responds about injuries.
+  - Otherwise: builds system prompt with profile, goal, plan (next 2 weeks), recent 5 sessions, today's date. Sends last 11 non-flagged chat messages as `messages`. Streams via `anthropic.messages.stream({ model: 'claude-sonnet-4-6' })` → ReadableStream of plain text chunks.
+  - On stream finish: persists assistant message to `coach_messages`.
+- `app/app/coach/page.tsx` — server component, `force-dynamic`. Auth guard. Fetches profile (id + goal) + plan (active or paused_injury) + last 50 chat messages in parallel. Passes `planReady` (true if active non-fallback plan exists) and chronologically-ordered messages to client.
+- `app/app/coach/_components/CoachChat.tsx` — client. Full-height column layout with header / scrollable message list / input bar. Streaming via `fetch().body.getReader()` with TextDecoder. Auto-scroll to bottom on every message change. Auto-grow textarea (max 5 lines, 120px). Enter to send, Shift+Enter for newline. Queue-while-streaming via `queueRef`. Bubbles: user (right, brand-teal/10 bg, brand-teal/30 border), coach (left, surface bg, AC avatar on first-in-group). Three-dot thinking indicator while waiting for first token. Empty state: synthetic coach greeting. Locked state (no plan): "I'll be ready to chat once your plan is built." with disabled input. Differentiates JSON responses (injury / rate_limit / error) from text streams via `Content-Type` header. On injury response: calls `setInjuryFlagged(true, triggerText, 'chat')` so the global `InjuryGuard` (Session 7) renders the referral screen.
+- `app/app/_components/AppNav.tsx` — added "Coach" tab.
+
+**Deferred:**
+- Nothing substantial. Coach is end-to-end functional pending the manual Supabase SQL run.
+
+**Decisions not in prompt:**
+- The prompt assumes `@ai-sdk/anthropic` + AI SDK `streamText`. The codebase has been using `@anthropic-ai/sdk` directly everywhere. To stay consistent and avoid a new dependency, used the Anthropic SDK's native `messages.stream()` and a Web `ReadableStream`. Client reads as plain text — simpler than the AI SDK's data-stream protocol.
+- Model: `claude-sonnet-4-6` (Session 5 decision). The prompt's `claude-sonnet-4-20250514` is not in the current model list.
+- Injury response uses JSON (not stream) so the client can branch cleanly. The HTTP response Content-Type is the discriminator: `application/json` → control message, `text/plain` → stream.
+- Injury detection writes the user's flagged message to `coach_messages` with `injury_flagged=true`, AND inserts an `injury_flags` row, AND pauses the active plan — mirrors `checkSessionInjury` in `lib/sessions/actions.ts` for behavioral consistency. Flagged chat messages are filtered out of both the AI context and the visible history.
+- Empty-state greeting drops the name (profiles table has no `first_name` column yet). The `firstNameFrom` helper is a stub so the copy can include a name once that column exists.
+- Coach uses `force-dynamic` because chat history must be fresh on each visit (the layout already does a per-request DB query for injury flags, so this isn't a regression).
+- Rate limit count uses `select('id', { count: 'exact', head: true })` — Supabase's HEAD count, no row payload.
+- Coach chat history sent to Claude is capped at the last 11 messages (10 prior + the just-inserted user message). Keeps prompt short and cheap; full history is preserved in DB.
+
+**Requires manual Supabase setup:**
+- Run the new `coach_messages` table block (and its index + RLS policy) from `supabase/schema.sql` in the SQL editor. The schema file is idempotent — re-running the whole file is safe.
 
 ### Session 8 — April 2026
 **Completed:**

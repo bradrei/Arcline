@@ -1,6 +1,15 @@
 export type { User } from '@supabase/supabase-js'
 
-export type InjurySource = 'session_log' | 'notes' | 'screenshot' | 'onboarding'
+export type InjurySource = 'session_log' | 'notes' | 'screenshot' | 'onboarding' | 'chat'
+
+export interface CoachMessage {
+  id: string
+  user_id: string
+  role: 'user' | 'assistant'
+  content: string
+  created_at: string
+  injury_flagged: boolean
+}
 
 export interface Profile {
   id: string
