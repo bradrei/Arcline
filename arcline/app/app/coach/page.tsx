@@ -33,7 +33,7 @@ export default async function CoachPage() {
   const plan = planResult.data as Pick<Plan, 'id' | 'status' | 'is_fallback'> | null
   const messages = ((messagesResult.data ?? []) as CoachMessage[]).reverse()
 
-  const planReady = Boolean(plan && !plan.is_fallback)
+  const planReady = Boolean(plan)
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col overflow-hidden">
