@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import EmailCapture from '@/app/_components/EmailCapture'
 
 export default function LandingPage() {
@@ -8,6 +9,12 @@ export default function LandingPage() {
         <span className="text-xl font-bold tracking-tight text-foreground">
           arc<span className="text-brand-teal">line</span>
         </span>
+        <Link
+          href="/login"
+          className="text-sm font-medium text-foreground-muted transition-colors hover:text-foreground"
+        >
+          Log in
+        </Link>
       </nav>
 
       {/* Hero */}
@@ -32,8 +39,14 @@ export default function LandingPage() {
             accordingly, every single time.
           </p>
 
-          {/* Email capture */}
-          <div className="flex justify-center">
+          {/* CTAs */}
+          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+            <Link
+              href="/signup"
+              className="rounded-xl bg-brand-teal px-8 py-3.5 text-sm font-semibold text-background transition-colors hover:bg-brand-teal-dim"
+            >
+              Get early access
+            </Link>
             <EmailCapture />
           </div>
 
