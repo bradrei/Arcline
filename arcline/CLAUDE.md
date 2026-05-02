@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 10 — May 2026  
-**Next session:** Session 11 — Long-term plan view (phase indicator, expandable timeline to goal date), polish and founder-readiness
+**Last completed session:** Session 11 — May 2026  
+**Next session:** Session 12 — Polish + founder-readiness (regenerate-plan trigger, edge case sweep, manual deploy checklist)
 
 ---
 
@@ -65,11 +65,14 @@ arcline/
     AnimatedSessionCards.tsx      ← client; stagger entrance, pulse dot on adapted sessions, click → SessionDetailSheet
     PlanWeekView.tsx              ← server wrapper, threads adaptedDates + adaptations to cards
     SessionDetailSheet.tsx        ← modal/sheet: session detail + "Adapted" reasoning section if present
+    PhaseIndicator.tsx            ← banner button above current week, opens timeline modal
+    PlanTimelineView.tsx          ← full-screen modal: vertical week cards with expandable session lists
   lib/
     auth/actions.ts               ← signUp / login / logout server actions
     adaptations/
       diff.ts                     ← computeAdaptationDiff(planBefore, planAfter), summarizeSession
       queries.ts                  ← getRecentAdaptations, getRecentlyAdaptedSessionDates, getAllAdaptations
+    plan/phase.ts                 ← computePhase, weeksUntilDate, formatGoalSuffix (pure helpers)
     ai/
       detectInjury.ts             ← HC2 classifier (haiku)
       generatePlan.ts             ← AI plan generation (sonnet) + HC1 enforcement
@@ -99,9 +102,8 @@ components/
 ### What is NOT built yet
 - Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Long-term plan view (phase indicator, expandable timeline to goal date) — Session 11
-- Manual "regenerate plan with AI" trigger when current plan is `is_fallback=true` — Session 11
-- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — TBD
+- Manual "regenerate plan with AI" trigger when current plan is `is_fallback=true` — Session 12
+- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — Session 12
 - Dogfood run: founder using real app end-to-end — blocked on Anthropic credits being added to the Vercel env
 
 ---
@@ -174,6 +176,42 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 11 — May 2026
+**Completed:**
+- `lib/plan/phase.ts` — pure helpers:
+  - `computePhase(weekNumber, totalWeeks)` returns `'Base' | 'Build' | 'Peak' | 'Taper'`. Plans ≤ 6 weeks always return `'Build'` (no periodisation for short plans). Comment in source clarifies: "Phase label is a UX cue, not a training directive — actual periodisation lives in the AI-generated plan."
+  - `weeksUntilDate(iso)` — returns `Math.ceil(diffMs / oneWeek)`, clamped to 0 for past dates and null inputs.
+  - `formatGoalSuffix(goalType, goalDate, goalDescription)` — produces the right-side banner text: `"14 weeks until Port Macquarie 70.3"` for event goals, `"Building toward sub-4hr marathon"` for pace goals, `"Building base fitness"` otherwise.
+- `components/PhaseIndicator.tsx` — client banner button. Renders `Week N of T · {Phase} Phase · {goal suffix}` with a chevron. Click opens `PlanTimelineView`. `whileTap` scale animation.
+- `components/PlanTimelineView.tsx` — full-screen modal (mobile) / centered max-w-2xl panel (desktop). Vertical scroll of `WeekCard` per plan week. Each card shows: `Week N · Sep 28 – Oct 4 · 8.5h · 4 sessions` plus discipline chips (S/B/R/Br/St with color coding and `×N` count when >1). Current week: teal left border + teal-tinted bg. Past weeks: 60% opacity. Final week of an event-goal plan: red `⚑ Race day` badge. Tap to expand → divides line, shows full session list (read-only) with day, duration, intensity, optional date, description. ESC + backdrop dismiss.
+- `app/app/dashboard/page.tsx` — added `<PhaseIndicator>` above the current week's `PlanWeekView`. No structural change to existing fetches.
+- `lib/ai/generatePlan.ts` — substantial rewrite:
+  - `computeTotalWeeks(profile)` — derives plan length from goal: `event_date` + `goal_date` → `weeksUntilDate(goal_date)` (floor of 4 weeks for safety); `pace_ability` → 12 weeks; otherwise → 12 weeks.
+  - `computePhaseRanges(totalWeeks)` — produces `{ base, build, peak, taper }` index ranges using the same 30/70/90% breakpoints as the UX helper. Plans ≤ 6 weeks collapse to a single Build range.
+  - `describePhases(ranges)` — emits human-readable phase guidance into the prompt.
+  - Block-based generation: every plan is now generated in 12-week blocks via `callBlock()`. ≤12 weeks runs as a single block; longer plans iterate. `previousLoad` is passed to each block as continuity context (last week's weighted minutes), so the AI builds smoothly across block boundaries.
+  - Each block prompt includes: athlete profile, full plan structure (total weeks, this block's range), the periodisation breakdown, continuity load from prior block, rules (rest day, brick conditions, intensity multipliers, week-number range constraint), and an explicit final-week race day rule for event goals.
+  - `MAX_TOKENS_PER_BLOCK` raised to 8192 (was 4096) — comfortable margin for 12 weeks of 5–7 sessions.
+  - HC1 enforcement still chains across the entire combined plan after all blocks return — same `enforceHC1()` logic, just operating on the full week list.
+  - Block validation: rejects responses where `parsed.weeks[0].week_number !== expectedWeekStart` or the last week_number doesn't match the expected end. Forces the model to honour the block boundaries.
+  - Failure path: any block failure (after a 2-attempt retry per block) triggers the existing `generateFallbackPlan` for the whole plan. No partial saves.
+
+**Deferred:**
+- Manual "regenerate plan with AI" trigger for users currently on a fallback plan — Session 12. This will let Bradley convert his current fallback plan into a real AI plan once he tops up Anthropic credits in Vercel.
+- Re-evaluation pulse for pace_ability goals at week 8 — the prompt suggests this; for now we just generate 12 weeks straight. Will revisit when those goals get used.
+
+**Decisions not in prompt:**
+- The prompt's `differenceInWeeks` from date-fns isn't installed. Replaced with a 4-line manual computation in `weeksUntilDate`.
+- Always block-generate, even for short plans. Simpler control flow than branching on `≤12` vs `>12` — the loop just iterates once for short plans.
+- Block validation includes start AND end week_number checks. Without the end check, Claude could short-return (e.g. 5 weeks when 12 were asked) and we'd silently accept a shorter plan.
+- The fallback plan generator was NOT extended to honour `goal_date`. It still produces 4 weeks. Reason: the fallback exists exactly when AI is unavailable; reimplementing periodisation in static templates would double the maintenance surface. Today the fallback is a "we have something to show you" placeholder, not a real plan.
+- Phase ranges use simple `Math.floor(totalWeeks * X)` breakpoints. They drift by 1 week vs the UX `computePhase` for some `totalWeeks`. For users this is invisible — the indicator label and the AI's prompt phase boundaries can be off by a week without causing problems. If we needed perfect alignment, we'd factor the ranges out into the same module; not worth it now.
+- `setExpandedWeek` had to come out of the modal's `useEffect` to satisfy `react-hooks/set-state-in-effect`. Initial state of `useState(currentWeekIndex)` covers the first-open case; subsequent opens preserve the user's last expansion (acceptable UX trade-off for a single-page dogfood scenario).
+- `MIN_WEEKS = 4` floor for event-date goals. Without it, a goal_date 1 week away would generate a single-week plan; 4 is a safer floor (will still taper sharply because all ≤6-week plans collapse to Build phase, but at least there's room to log).
+
+**Requires manual setup:**
+- None new. Existing `plans` schema already accommodates arbitrary `weeks` count via `jsonb`.
 
 ### Session 10 — May 2026
 **Completed:**

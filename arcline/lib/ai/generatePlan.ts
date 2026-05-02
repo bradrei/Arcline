@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { Profile, Plan, PlanWeek, PlanSession, Intensity, SessionType } from '@/types'
 import { generateFallbackPlan } from './generateFallbackPlan'
+import { weeksUntilDate } from '@/lib/plan/phase'
 
 const INTENSITY_MULTIPLIERS: Record<Intensity, number> = {
   easy: 1.0,
@@ -8,6 +9,11 @@ const INTENSITY_MULTIPLIERS: Record<Intensity, number> = {
   hard: 1.6,
   race_pace: 1.8,
 }
+
+const BLOCK_SIZE = 12
+const MIN_WEEKS = 4
+const PACE_GOAL_WEEKS = 12
+const MAX_TOKENS_PER_BLOCK = 8192
 
 interface AIPlanSession {
   day: string
@@ -33,11 +39,24 @@ interface AIPlanOutput {
   weeks: AIPlanWeek[]
 }
 
+interface PhaseRanges {
+  base: [number, number] | null
+  build: [number, number]
+  peak: [number, number] | null
+  taper: [number, number] | null
+}
+
 function getWeekStart(): string {
   const d = new Date()
-  const day = d.getDay() // 0=Sun, 1=Mon ... 6=Sat
+  const day = d.getDay()
   const daysUntilMonday = day === 0 ? 1 : day === 1 ? 0 : 8 - day
   d.setDate(d.getDate() + daysUntilMonday)
+  return d.toISOString().split('T')[0]
+}
+
+function addDays(iso: string, days: number): string {
+  const d = new Date(iso)
+  d.setDate(d.getDate() + days)
   return d.toISOString().split('T')[0]
 }
 
@@ -48,7 +67,37 @@ function computeWeekLoad(sessions: AIPlanSession[]): number {
   }, 0)
 }
 
-// HC1: cap each week at 115% of the previous week's load
+function computeTotalWeeks(profile: Profile): number {
+  if (profile.goal_type === 'event_date' && profile.goal_date) {
+    const weeks = weeksUntilDate(profile.goal_date)
+    return Math.max(MIN_WEEKS, weeks)
+  }
+  return PACE_GOAL_WEEKS
+}
+
+function computePhaseRanges(totalWeeks: number): PhaseRanges {
+  if (totalWeeks <= 6) return { base: null, build: [1, totalWeeks], peak: null, taper: null }
+  const baseEnd = Math.max(1, Math.floor(totalWeeks * 0.30))
+  const buildEnd = Math.max(baseEnd + 1, Math.floor(totalWeeks * 0.70))
+  const peakEnd = Math.max(buildEnd + 1, Math.floor(totalWeeks * 0.90))
+  return {
+    base: [1, baseEnd],
+    build: [baseEnd + 1, buildEnd],
+    peak: buildEnd + 1 <= peakEnd ? [buildEnd + 1, peakEnd] : null,
+    taper: peakEnd + 1 <= totalWeeks ? [peakEnd + 1, totalWeeks] : null,
+  }
+}
+
+function describePhases(ranges: PhaseRanges): string {
+  const parts: string[] = []
+  if (ranges.base) parts.push(`Base phase (weeks ${ranges.base[0]}-${ranges.base[1]}): aerobic base, technique, easy volume`)
+  parts.push(`Build phase (weeks ${ranges.build[0]}-${ranges.build[1]}): tempo, threshold, brick sessions, growing volume`)
+  if (ranges.peak) parts.push(`Peak phase (weeks ${ranges.peak[0]}-${ranges.peak[1]}): race-specific intensity, sharpening, highest volume`)
+  if (ranges.taper) parts.push(`Taper phase (weeks ${ranges.taper[0]}-${ranges.taper[1]}): reduced volume, kept intensity, rest before race`)
+  return parts.map(p => `- ${p}`).join('\n')
+}
+
+// HC1: cap each week at 115% of the previous week's load (chains across all weeks).
 function enforceHC1(weeks: AIPlanWeek[]): AIPlanWeek[] {
   if (weeks.length === 0) return weeks
   const result: AIPlanWeek[] = [weeks[0]]
@@ -98,18 +147,30 @@ function aiWeekToPlanWeek(w: AIPlanWeek): PlanWeek {
   }
 }
 
-function buildUserPrompt(profile: Profile, weekCount: number, weekStart: string): string {
+function buildBlockPrompt(
+  profile: Profile,
+  totalWeeks: number,
+  blockStart: number,
+  blockSize: number,
+  weekStart: string,
+  previousLoad: number | null,
+  ranges: PhaseRanges,
+): string {
+  const blockEnd = blockStart + blockSize - 1
+  const isFinalBlock = blockEnd === totalWeeks
+  const isEventGoal = profile.goal_type === 'event_date'
+
   const schema = `{
   "weeks": [
     {
-      "week_number": 1,
+      "week_number": ${blockStart},
       "week_start": "YYYY-MM-DD",
       "total_load_minutes": 480,
       "sessions": [
         {
           "day": "Monday",
           "date": "YYYY-MM-DD",
-          "type": "swim|bike|run|brick|strength|rest|other",
+          "type": "swim|bike|run|brick|strength|rest|other|race",
           "duration_min": 45,
           "intensity": "easy|moderate|hard|race_pace",
           "intensity_multiplier": 1.0,
@@ -123,6 +184,14 @@ function buildUserPrompt(profile: Profile, weekCount: number, weekStart: string)
   ]
 }`
 
+  const continuity = previousLoad !== null
+    ? `Continuity: the previous block ended with weekly load of ${Math.round(previousLoad)} weighted minutes. Build naturally from there — never spike above 115% of the previous week.`
+    : 'This is the first block of the plan.'
+
+  const finalWeekRule = isFinalBlock && isEventGoal
+    ? `\n- The final week (week ${totalWeeks}) MUST include race day itself as a session of type "race". Race day intensity is "race_pace". Schedule the rest of the taper week appropriately around it.`
+    : ''
+
   return `Athlete profile:
 - Age: ${profile.age ?? 'unknown'}, Sex: ${profile.sex ?? 'unknown'}
 - Height: ${profile.height_cm ?? '?'}cm, Weight: ${profile.weight_kg ?? '?'}kg
@@ -131,45 +200,46 @@ function buildUserPrompt(profile: Profile, weekCount: number, weekStart: string)
 - Disciplines: ${(profile.disciplines ?? []).join(', ') || 'triathlon'}
 - Injuries/conditions: ${profile.injuries_conditions || 'none'}
 - Weekly availability: ${profile.weekly_hours_available ?? 6} hours across ${profile.weekly_days_available ?? 4} days
-- Goal: ${profile.goal_type === 'event_date' ? `event on ${profile.goal_date}` : 'fitness goal'}
+- Goal type: ${profile.goal_type ?? 'unspecified'}
+- Goal date: ${profile.goal_date ?? 'open-ended'}
 - Goal description: ${profile.goal_description ?? 'not specified'}
 
-Generate a ${weekCount}-week training block. Week 1 starts ${weekStart}.
+Plan structure:
+- Total plan length: ${totalWeeks} week${totalWeeks === 1 ? '' : 's'}
+- This call generates weeks ${blockStart} through ${blockEnd} (${blockSize} week${blockSize === 1 ? '' : 's'})
+- Periodisation across the whole plan:
+${describePhases(ranges)}
+
+${continuity}
 
 Rules:
-- Include exactly 1 rest day per week (type "rest", duration_min 0, intensity "easy", completed false)
-- Include brick sessions when athlete trains 5+ days and trains both bike and run
-- Periodization: weeks build toward peak, final week is recovery at ~70% of peak load
-- Distribute training across the available ${profile.weekly_days_available ?? 4} days plus 1 rest day
-- Match total weekly active duration to ~${Math.round((profile.weekly_hours_available ?? 6) * 60)} minutes
-- intensity_multiplier must match: easy=1.0, moderate=1.3, hard=1.6, race_pace=1.8
+- Each week has exactly 1 rest day (type "rest", duration_min 0, intensity "easy", completed false)
+- Distribute remaining sessions across the athlete's available ${profile.weekly_days_available ?? 4} training days
+- Match total weekly active duration to ~${Math.round((profile.weekly_hours_available ?? 6) * 60)} minutes during peak weeks; reduce in base/taper
+- Include brick sessions when the athlete trains 5+ days and trains both bike and run
+- intensity_multiplier values are fixed: easy=1.0, moderate=1.3, hard=1.6, race_pace=1.8
 - total_load_minutes = sum of (duration_min × intensity_multiplier) across all sessions in the week
-- All session dates must be real calendar dates beginning from ${weekStart}
-- Output ONLY raw JSON matching the schema exactly. No markdown. No code fences. No text before or after.
+- Apply the appropriate phase from the periodisation above for each week in this block
+- Week 1 of the block starts ${weekStart}; subsequent weeks follow weekly. All session dates must be real calendar dates.
+- week_number values in this block must be exactly ${blockStart} through ${blockEnd}, in that order${finalWeekRule}
+- Output ONLY raw JSON matching the schema. No markdown, no code fences, no text before or after.
 
 Schema:
 ${schema}`
 }
 
-export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  const weekCount = profile.goal_type === 'pace_ability' ? 6 : 4
-  const weekStart = getWeekStart()
-
-  if (!apiKey || apiKey.startsWith('your-')) {
-    return generateFallbackPlan(profile, profile.id)
-  }
-
-  const client = new Anthropic({ apiKey })
-  const systemPrompt =
-    'You are an expert triathlon coach building personalised training plans for hybrid athletes (swim/bike/run). Output ONLY raw JSON — no markdown, no explanation, no code fences, no text before or after the JSON object.'
-  const userPrompt = buildUserPrompt(profile, weekCount, weekStart)
-
+async function callBlock(
+  client: Anthropic,
+  systemPrompt: string,
+  userPrompt: string,
+  expectedWeekStart: number,
+  expectedWeekEnd: number,
+): Promise<AIPlanWeek[]> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const message = await client.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: MAX_TOKENS_PER_BLOCK,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       })
@@ -181,28 +251,82 @@ export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> 
       if (!Array.isArray(parsed.weeks) || parsed.weeks.length === 0) {
         throw new Error('empty weeks array')
       }
-
-      const enforced = enforceHC1(parsed.weeks)
-
-      return {
-        user_id: profile.id,
-        generated_at: new Date().toISOString(),
-        version: 1,
-        goal_anchor: {
-          goal_type: profile.goal_type,
-          goal_date: profile.goal_date,
-          goal_description: profile.goal_description,
-        },
-        weeks: enforced.map(aiWeekToPlanWeek),
-        status: 'active',
-        adaptation_count: 0,
-        is_fallback: false,
+      if (parsed.weeks[0].week_number !== expectedWeekStart) {
+        throw new Error(`block week_number mismatch: got ${parsed.weeks[0].week_number}, expected ${expectedWeekStart}`)
       }
+      if (parsed.weeks[parsed.weeks.length - 1].week_number !== expectedWeekEnd) {
+        throw new Error(
+          `block end mismatch: got ${parsed.weeks[parsed.weeks.length - 1].week_number}, expected ${expectedWeekEnd}`,
+        )
+      }
+      return parsed.weeks
     } catch {
-      if (attempt === 1) break
+      if (attempt === 1) throw new Error('block generation failed after retry')
     }
   }
+  throw new Error('unreachable')
+}
 
-  // Both attempts failed — use fallback plan
-  return generateFallbackPlan(profile, profile.id)
+export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey || apiKey.startsWith('your-')) {
+    return generateFallbackPlan(profile, profile.id)
+  }
+
+  const totalWeeks = computeTotalWeeks(profile)
+  const planStart = getWeekStart()
+  const ranges = computePhaseRanges(totalWeeks)
+
+  const client = new Anthropic({ apiKey })
+  const systemPrompt =
+    'You are an expert triathlon coach building personalised, periodised training plans for hybrid athletes (swim/bike/run). Output ONLY raw JSON — no markdown, no explanation, no code fences, no text before or after the JSON object.'
+
+  try {
+    const allWeeks: AIPlanWeek[] = []
+    let blockStart = 1
+    let dateCursor = planStart
+
+    while (blockStart <= totalWeeks) {
+      const remaining = totalWeeks - blockStart + 1
+      const blockSize = Math.min(BLOCK_SIZE, remaining)
+      const blockEnd = blockStart + blockSize - 1
+      const previousLoad =
+        allWeeks.length > 0 ? computeWeekLoad(allWeeks[allWeeks.length - 1].sessions) : null
+
+      const userPrompt = buildBlockPrompt(
+        profile,
+        totalWeeks,
+        blockStart,
+        blockSize,
+        dateCursor,
+        previousLoad,
+        ranges,
+      )
+
+      const blockWeeks = await callBlock(client, systemPrompt, userPrompt, blockStart, blockEnd)
+      allWeeks.push(...blockWeeks)
+
+      blockStart += blockSize
+      dateCursor = addDays(dateCursor, blockSize * 7)
+    }
+
+    const enforced = enforceHC1(allWeeks)
+
+    return {
+      user_id: profile.id,
+      generated_at: new Date().toISOString(),
+      version: 1,
+      goal_anchor: {
+        goal_type: profile.goal_type,
+        goal_date: profile.goal_date,
+        goal_description: profile.goal_description,
+      },
+      weeks: enforced.map(aiWeekToPlanWeek),
+      status: 'active',
+      adaptation_count: 0,
+      is_fallback: false,
+    }
+  } catch {
+    return generateFallbackPlan(profile, profile.id)
+  }
 }

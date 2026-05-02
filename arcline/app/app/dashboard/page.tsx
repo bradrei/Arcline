@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Plan, TrainingSession } from '@/types'
 import { PlanWeekView } from '@/components/PlanWeekView'
+import { PhaseIndicator } from '@/components/PhaseIndicator'
 import { StreakCounter } from '@/components/gamification/StreakCounter'
 import { WeeklyRing } from '@/components/gamification/WeeklyRing'
 import { LoadTrendGraph, type WeekLoad } from '@/components/gamification/LoadTrendGraph'
@@ -156,6 +157,13 @@ export default async function DashboardPage() {
       {!typedPlan && (
         <div className="rounded-xl border border-white/10 bg-surface px-6 py-10 text-center">
           <p className="text-foreground-muted">No active plan found. Complete onboarding to get started.</p>
+        </div>
+      )}
+
+      {/* Phase indicator + timeline trigger */}
+      {typedPlan && (
+        <div className="mb-4">
+          <PhaseIndicator plan={typedPlan} currentWeekIndex={weekIndex} />
         </div>
       )}
 
