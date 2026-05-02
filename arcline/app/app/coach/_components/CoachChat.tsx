@@ -17,12 +17,20 @@ interface CoachChatProps {
   initialMessages: CoachMessage[]
   planReady: boolean
   athleteFirstName: string
+  initialPrefill?: string
+  quickActions?: string[]
 }
 
 const EMPTY_STATE_MESSAGE = (name: string) =>
   `Hey${name ? ` ${name}` : ''}. I've got your plan and your recent sessions. Ask me anything — about your training, your goal, or what to expect this week.`
 
-export function CoachChat({ initialMessages, planReady, athleteFirstName }: CoachChatProps) {
+export function CoachChat({
+  initialMessages,
+  planReady,
+  athleteFirstName,
+  initialPrefill = '',
+  quickActions = [],
+}: CoachChatProps) {
   const setInjuryFlagged = useArclineStore(s => s.setInjuryFlagged)
 
   const [messages, setMessages] = useState<DisplayMessage[]>(() =>
@@ -32,7 +40,7 @@ export function CoachChat({ initialMessages, planReady, athleteFirstName }: Coac
       content: m.content,
     })),
   )
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(initialPrefill)
   const [streaming, setStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queueRef = useRef<string[]>([])
@@ -159,7 +167,32 @@ export function CoachChat({ initialMessages, planReady, athleteFirstName }: Coac
     }
   }
 
+  function handleChipClick(text: string) {
+    setInput(text)
+    textareaRef.current?.focus()
+    const len = text.length
+    requestAnimationFrame(() => {
+      textareaRef.current?.setSelectionRange(len, len)
+    })
+  }
+
+  // Focus textarea + place cursor at end if we mounted with prefill
+  useEffect(() => {
+    if (!initialPrefill) return
+    const ta = textareaRef.current
+    if (!ta) return
+    ta.focus()
+    const len = initialPrefill.length
+    ta.setSelectionRange(len, len)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const showEmptyState = messages.length === 0
+  const showChips =
+    planReady &&
+    quickActions.length > 0 &&
+    !streaming &&
+    input.trim().length === 0
 
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
@@ -232,8 +265,23 @@ export function CoachChat({ initialMessages, planReady, athleteFirstName }: Coac
 
       {/* Input bar */}
       <div className="border-t border-white/10 bg-background/95 px-4 py-3 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-xl items-end gap-2 rounded-2xl border border-white/10 bg-surface px-3 py-2">
-          <textarea
+        <div className="mx-auto flex w-full max-w-xl flex-col gap-2">
+          {showChips && (
+            <div className="flex flex-wrap gap-1.5">
+              {quickActions.map(chip => (
+                <button
+                  key={chip}
+                  type="button"
+                  onClick={() => handleChipClick(chip)}
+                  className="rounded-full border border-white/10 bg-surface px-3 py-1.5 text-xs text-foreground-muted transition hover:border-brand-teal/30 hover:bg-brand-teal/5 hover:text-brand-teal"
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-end gap-2 rounded-2xl border border-white/10 bg-surface px-3 py-2">
+            <textarea
             ref={textareaRef}
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -257,6 +305,7 @@ export function CoachChat({ initialMessages, planReady, athleteFirstName }: Coac
             </svg>
           </button>
         </div>
+      </div>
       </div>
     </div>
   )

@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 11 — May 2026  
-**Next session:** Session 12 — Polish + founder-readiness (regenerate-plan trigger, edge case sweep, manual deploy checklist)
+**Last completed session:** Session 12 — May 2026  
+**Next session:** Session 13 — Polish + founder-readiness (regenerate-plan trigger for fallback users, edge-case sweep, manual deploy checklist)
 
 ---
 
@@ -77,7 +77,8 @@ arcline/
       detectInjury.ts             ← HC2 classifier (haiku)
       generatePlan.ts             ← AI plan generation (sonnet) + HC1 enforcement
       generateFallbackPlan.ts     ← stub plan generator (is_fallback=true)
-      triggerAdaptation.ts        ← real adaptation engine (Session 6)
+      triggerAdaptation.ts        ← real adaptation engine (Session 6) + writes coach chat message after each adaptation
+      generateCoachAdaptationMessage.ts ← haiku rewrites adaptation reasoning into a chat-tone note
     sessions/
       actions.ts                  ← checkSessionInjury, logManualSession, extractScreenshot, confirmSession, disconnectStrava
       save.ts                     ← saveSessionAndTriggerAdaptation (shared across all 3 log methods)
@@ -176,6 +177,37 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 12 — May 2026
+**Completed:**
+- `lib/ai/generateCoachAdaptationMessage.ts` — new `'server-only'` helper. Calls `claude-haiku-4-5-20251001` (200 max tokens) to rewrite the adaptation engine's `ai_reasoning` into a 2–3 sentence chat-tone message. System prompt enforces second person, no medical advice, no quotes/preamble. Returns `null` if the API key is missing, the reasoning is empty, or the call fails — failure is non-fatal.
+- `lib/ai/triggerAdaptation.ts` — after `savePlanVersion` succeeds, calls `generateCoachAdaptationMessage` and inserts an assistant-role row into `coach_messages`. Wrapped in try/catch with `console.error` — adaptation success never depends on coach-message success.
+- `components/SessionDetailSheet.tsx` — added an "Ask coach about this session" CTA below "Log this session". Routes to `/app/coach?prefill=…` and closes the sheet on click. New `buildAskCoachPrefill(session)` helper produces the prefill text:
+  - active session: `"Tell me about my Tuesday run on May 5"`
+  - rest day: `"Tell me about my Wednesday rest day (May 5)"`
+- `app/app/coach/page.tsx` — now an async page that awaits `searchParams` (Next.js 16 Promise convention). Reads `prefill` (string, sliced to 500 chars), fetches the full active plan (`select('*')` instead of just metadata), computes `getQuickActions(plan)` server-side. Quick-action logic: tomorrow's planned non-rest session → `"What should I focus on for tomorrow's <type>?"`, plus two evergreen prompts. Returns array of strings, filtered for nulls.
+- `app/app/coach/_components/CoachChat.tsx`:
+  - Accepts new `initialPrefill?: string` and `quickActions?: string[]` props.
+  - Initializes `input` state from `initialPrefill` (so navigating from a session card opens the chat with the question pre-typed).
+  - On mount, if `initialPrefill`, focuses the textarea and places the cursor at the end. Used `eslint-disable-next-line react-hooks/exhaustive-deps` to keep it mount-only.
+  - New `handleChipClick(text)` sets the input, focuses the textarea, places cursor at end via `requestAnimationFrame` (avoids racing the value set).
+  - Quick action chips render above the input bar when `planReady && quickActions.length > 0 && !streaming && input.trim() === ''`. Pill-style buttons with hover going teal. Auto-hide as soon as the user starts typing or while streaming.
+
+**Deferred:**
+- Real-time refresh of the chat view if a coach message lands while the user is on `/app/coach` — currently the message appears on next page load. Could be addressed via a poller on `coach_messages` modeled after `AdaptationPoller`. Not worth wiring before dogfood.
+- Manual "regenerate plan with AI" trigger for fallback users — Session 13.
+
+**Decisions not in prompt:**
+- Used `claude-haiku-4-5-20251001` for the coach message rewrite — the prompt explicitly asks for haiku and it's the right cost/latency profile (≈$0.001 per call, sub-second).
+- The coach-message insert is best-effort and silently degrades on failure. The athlete's plan IS adapted regardless. If we made the chat insert load-bearing, a transient haiku failure would block the entire adaptation pipeline — wrong tradeoff.
+- The quick-action chip "I'm feeling a bit flat this week — should I be worried?" was deliberately kept verbatim from the prompt despite the word "feeling". HC2 is trained on physical injury/pain language, not mood/fatigue language ("flat" is not in the trigger set). The HC2 detector still runs on send, so any actual injury text typed by the user is caught. Tested mentally against the existing classifier prompt: "feeling flat this week" should classify `injured: false`. If it ever false-positives the existing `hc2_false_positives` flow handles it.
+- Prefill is server-side via `searchParams` rather than client-side via `useSearchParams`. Reason: the page is already async, so reading `searchParams` is one line; client-side `useSearchParams` would require a Suspense boundary in Next 16. Slightly tighter integration with our existing dynamic page.
+- Prefill text is truncated to 500 chars server-side. Defensive — the "Ask coach about this session" link is the only producer today, but the param is technically attacker-controllable.
+- Cursor placement: the `requestAnimationFrame` wrapper in `handleChipClick` exists because `setInput` triggers a re-render, and calling `setSelectionRange` synchronously would target the previous DOM value. The rAF defers it to after the controlled value commits.
+- Chip pill design uses brand-teal hover state, matching the rest of the design language. Three chips by default for a Tuesday-week plan; if no plan exists, `quickActions` is `[]` and the chip row doesn't render.
+
+**Requires manual setup:**
+- None new. Both behaviors use the existing `coach_messages` table.
 
 ### Session 11 — May 2026
 **Completed:**

@@ -39,6 +39,19 @@ function formatDate(iso?: string): string | null {
   })
 }
 
+function buildAskCoachPrefill(s: PlanSession): string {
+  const monthDay = s.date
+    ? new Date(s.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : null
+  if (s.type === 'rest') {
+    return `Tell me about my ${s.day} rest day${monthDay ? ` (${monthDay})` : ''}`
+  }
+  const typeLabel = s.type.replace('_', ' ')
+  return monthDay
+    ? `Tell me about my ${s.day} ${typeLabel} on ${monthDay}`
+    : `Tell me about my ${s.day} ${typeLabel} session`
+}
+
 function formatTriggerType(type: string | null): string {
   switch (type) {
     case 'session_performance':
@@ -186,15 +199,24 @@ export function SessionDetailSheet({ open, session, adaptations, onClose }: Prop
               </div>
             )}
 
-            {session.type !== 'rest' && (
+            <div className="flex flex-col gap-2">
+              {session.type !== 'rest' && (
+                <Link
+                  href="/app/log"
+                  onClick={onClose}
+                  className="block rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-3 text-center text-sm font-semibold text-brand-teal transition hover:bg-brand-teal/20"
+                >
+                  Log this session
+                </Link>
+              )}
               <Link
-                href="/app/log"
+                href={`/app/coach?prefill=${encodeURIComponent(buildAskCoachPrefill(session))}`}
                 onClick={onClose}
-                className="block rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-3 text-center text-sm font-semibold text-brand-teal transition hover:bg-brand-teal/20"
+                className="block rounded-xl border border-white/10 bg-surface px-4 py-3 text-center text-sm font-semibold text-foreground-muted transition hover:border-white/20 hover:text-foreground"
               >
-                Log this session
+                Ask coach about this session
               </Link>
-            )}
+            </div>
           </motion.div>
         </motion.div>
       )}

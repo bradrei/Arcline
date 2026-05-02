@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { Profile, Plan, PlanWeek, PlanSession, TrainingSession, Intensity } from '@/types'
+import { generateCoachAdaptationMessage } from './generateCoachAdaptationMessage'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -315,6 +316,24 @@ Shape 2 — injury detected:
     load_before: baselineLoad,
     load_after: loadAfter,
   })
+
+  // Persist a coach chat message so the athlete sees a note from their coach
+  // next time they open /app/coach. Failure here must not break the adaptation.
+  try {
+    const coachMessage = await generateCoachAdaptationMessage(
+      response.ai_reasoning ?? '',
+      triggerType,
+    )
+    if (coachMessage) {
+      await supabase.from('coach_messages').insert({
+        user_id: userId,
+        role: 'assistant',
+        content: coachMessage,
+      })
+    }
+  } catch (err) {
+    console.error('Failed to persist coach adaptation message:', err)
+  }
 
   // Note: Zustand store (setActivePlan, triggerAdaptationToast) cannot be called
   // server-side. Plan update is visible on next dashboard render.
