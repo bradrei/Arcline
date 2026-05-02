@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useArclineStore } from '@/store/arclineStore'
@@ -163,13 +164,21 @@ export function CoachChat({ initialMessages, planReady, athleteFirstName }: Coac
   return (
     <div className="flex h-full flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-white/5 px-6 py-4">
-        <h1 className="text-lg font-bold text-foreground">Coach</h1>
-        <p className="text-xs text-foreground-muted">
-          {planReady
-            ? 'Your AI coach has full context of your plan and recent sessions.'
-            : 'Coach unlocks once your plan is ready.'}
-        </p>
+      <div className="flex items-start justify-between gap-3 border-b border-white/5 px-6 py-4">
+        <div>
+          <h1 className="text-lg font-bold text-foreground">Coach</h1>
+          <p className="text-xs text-foreground-muted">
+            {planReady
+              ? 'Your AI coach has full context of your plan and recent sessions.'
+              : 'Coach unlocks once your plan is ready.'}
+          </p>
+        </div>
+        <Link
+          href="/app/coach/history"
+          className="shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-foreground-muted transition hover:border-white/20 hover:text-foreground"
+        >
+          History
+        </Link>
       </div>
 
       {/* Message list */}

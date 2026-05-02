@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 9 — April 2026  
-**Next session:** Session 10 — Visible adaptation reasoning + long-term plan view (phase indicator, expandable timeline)
+**Last completed session:** Session 10 — May 2026  
+**Next session:** Session 11 — Long-term plan view (phase indicator, expandable timeline to goal date), polish and founder-readiness
 
 ---
 
@@ -39,6 +39,9 @@ arcline/
       coach/
         page.tsx                  ← /app/coach (server, fetches last 50 messages)
         _components/CoachChat.tsx ← chat UI: streaming, queue, HC2-aware
+        history/
+          page.tsx                ← /app/coach/history (all adaptations, reasoning, diffs)
+          _components/AdaptationHistoryList.tsx ← expandable diff cards
       log/
         page.tsx                  ← /app/log (real — Session 5)
         _components/
@@ -59,10 +62,14 @@ arcline/
     StreakCounter.tsx              ← flame SVG (looping flicker), count-up from 0
     WeeklyRing.tsx                ← SVG ring, stroke-dashoffset animation, gold at 100%
   components/
-    AnimatedSessionCards.tsx      ← client component, stagger entrance for session cards
-    PlanWeekView.tsx              ← server wrapper → AnimatedSessionCards
+    AnimatedSessionCards.tsx      ← client; stagger entrance, pulse dot on adapted sessions, click → SessionDetailSheet
+    PlanWeekView.tsx              ← server wrapper, threads adaptedDates + adaptations to cards
+    SessionDetailSheet.tsx        ← modal/sheet: session detail + "Adapted" reasoning section if present
   lib/
     auth/actions.ts               ← signUp / login / logout server actions
+    adaptations/
+      diff.ts                     ← computeAdaptationDiff(planBefore, planAfter), summarizeSession
+      queries.ts                  ← getRecentAdaptations, getRecentlyAdaptedSessionDates, getAllAdaptations
     ai/
       detectInjury.ts             ← HC2 classifier (haiku)
       generatePlan.ts             ← AI plan generation (sonnet) + HC1 enforcement
@@ -92,10 +99,10 @@ components/
 ### What is NOT built yet
 - Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Visible adaptation reasoning UI (every adaptation shows the user why) — Session 10
-- Long-term plan view (phase indicator, expandable timeline to goal date) — Session 10
+- Long-term plan view (phase indicator, expandable timeline to goal date) — Session 11
+- Manual "regenerate plan with AI" trigger when current plan is `is_fallback=true` — Session 11
 - Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — TBD
-- Dogfood run: founder using real app end-to-end — TBD
+- Dogfood run: founder using real app end-to-end — blocked on Anthropic credits being added to the Vercel env
 
 ---
 
@@ -168,7 +175,46 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
 
-### Session 9 — April 2026
+### Session 10 — May 2026
+**Completed:**
+- `types/index.ts` — added `Adaptation`, `AdaptationTrigger`, `SessionChange` types. Maps to existing `adaptations` table from Session 2 (no schema change needed).
+- `lib/adaptations/diff.ts` — pure helpers:
+  - `computeAdaptationDiff(planBefore, planAfter)` — diffs two plans, returns `SessionChange[]` with `'modified' | 'added' | 'removed'` per session, keyed by `session.date` (falls back to `w{n}-{day}` composite key).
+  - `adaptedDatesIn(plan)` — extracts all session dates from a plan.
+  - `summarizeSession(s)` — `"60min easy run"` style label for diff display.
+- `lib/adaptations/queries.ts` (`'server-only'`):
+  - `getRecentAdaptations(supabase, userId, days=7)` — last-week adaptations.
+  - `getAllAdaptations(supabase, userId)` — full history for /app/coach/history.
+  - `getRecentlyAdaptedSessionDates(adaptations)` — collapses adaptations into a `Set<string>` of affected session dates → fed to dashboard/plan for pulse rendering.
+  - `findAdaptationsForSessionDate(adaptations, date)` — filter helper for the detail sheet.
+- `components/SessionDetailSheet.tsx` — animated bottom sheet (mobile) / centered modal (sm+). Shows session metadata (type, duration, intensity, description, target pace, HR zone) + an "Adapted" section per adaptation affecting this date with the AI reasoning, trigger label, and the actual modified/added diff. ESC + backdrop click + close button all dismiss. Spring entrance.
+- `components/AnimatedSessionCards.tsx` — rewritten:
+  - Cards are now `<button>` elements that open the detail sheet on click.
+  - `PulseDot` component animates on the top-right when `session.date` is in `adaptedDates`.
+  - Removed the inline "Log this session" link from the card; the same CTA is now inside the detail sheet (every session is one tap from logging, but with full context first).
+  - `props: { sessions, adaptedDates?, adaptations? }` — backwards-compatible (props optional).
+- `components/PlanWeekView.tsx` — accepts and forwards `adaptedDates` + `adaptations` props.
+- `app/app/dashboard/page.tsx` — fetches `getRecentAdaptations` in parallel with plan + sessions, threads `adaptedDates` and the adaptations array into `PlanWeekView`.
+- `app/app/plan/page.tsx` — same.
+- `app/app/coach/history/page.tsx` — server component, `force-dynamic`. Fetches all adaptations for user, renders header + `AdaptationHistoryList`. Empty state copy matches the prompt's spec.
+- `app/app/coach/history/_components/AdaptationHistoryList.tsx` — client. One card per adaptation, reverse-chronological (already ordered server-side). Shows trigger label (mapped from `trigger_type`), `formatDate(created_at)`, `ai_reasoning`, weekly load before/after if present, and a `View changes (N)` toggle that animates open a per-session diff list (modified shows `before line-through → after`; added/removed labelled).
+- `app/app/coach/_components/CoachChat.tsx` — added a small "History" link in the chat header pointing to `/app/coach/history`.
+
+**Deferred:**
+- Long-term plan view (phase indicator, expandable timeline to goal date) — Session 11. Session 10 prompt grouped this with adaptation reasoning, but it's a meaningful chunk of work on its own (phase computation, periodisation labels, an entirely new visualization). Better to ship visible adaptation reasoning end-to-end first.
+- Trigger-type label coverage when the engine writes a trigger we don't know about — falls back to "Plan adjusted". No DB change needed.
+
+**Decisions not in prompt:**
+- Removed the inline "Log this session" CTA from the card and moved it into the detail sheet. Reason: the prompt requires the card itself to open the sheet on tap, and a nested clickable `<a>` inside a `<button>` is invalid HTML and creates click-conflict UX. The flow is now: tap card → sheet shows full session detail + adaptation context (if any) + log button. One extra tap, much more context, valid HTML.
+- The diff function keys sessions by `session.date` when available, falling back to `w{week_number}-{day}` composite. This handles both the AI-generated plans (which have `date` filled) and any older fallback plans (which don't). If neither plan has dates, the diff still works by aligning the same `(week_number, day)` slot.
+- `SessionDetailSheet` uses a single `AnimatePresence` with both backdrop and sheet as motion children — backdrop fades, sheet slides up. Spring physics match the rest of the app (stiffness 280, damping 28).
+- Pulse dot uses Framer Motion looping (`scale: [1,1.4,1]`), not CSS keyframes. Consistent with how the gamification components animate.
+- "View changes" toggle uses a layout animation + height auto transition. Works without measuring height because Framer Motion handles `height: 'auto'` correctly.
+- Adaptation queries are SSR-only (`import 'server-only'`). They're called from server components, never the client — keeps the supabase service role anonymity safe.
+- Pulse window is hardcoded to 7 days. Fits the prompt and matches the helper's default.
+
+**Requires manual setup:**
+- None new. The `adaptations` table already exists from Session 2.
 **Completed:**
 - `app/page.tsx` — landing page nav now has "Log in" link + "Get early access" CTA pointing to `/signup`. Without these, users hitting the Vercel URL had no way into the actual app.
 - `types/index.ts` — `InjurySource` extended with `'chat'`. `CoachMessage` interface added.

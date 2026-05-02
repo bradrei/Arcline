@@ -11,6 +11,35 @@ export interface CoachMessage {
   injury_flagged: boolean
 }
 
+export type AdaptationTrigger =
+  | 'session_performance'
+  | 'missed'
+  | 'reduced'
+  | 'extended'
+  | 'added'
+  | 'injury_return'
+
+export interface Adaptation {
+  id: string
+  user_id: string
+  plan_id: string | null
+  created_at: string
+  trigger_type: AdaptationTrigger | string | null
+  trigger_session_id: string | null
+  ai_reasoning: string | null
+  load_before: number | null
+  load_after: number | null
+  plan_before: Plan | null
+  plan_after: Plan | null
+}
+
+export interface SessionChange {
+  type: 'modified' | 'added' | 'removed'
+  date: string
+  before?: PlanSession
+  after?: PlanSession
+}
+
 export interface Profile {
   id: string
   age: number | null

@@ -5,6 +5,10 @@ import { PlanWeekView } from '@/components/PlanWeekView'
 import { StreakCounter } from '@/components/gamification/StreakCounter'
 import { WeeklyRing } from '@/components/gamification/WeeklyRing'
 import { LoadTrendGraph, type WeekLoad } from '@/components/gamification/LoadTrendGraph'
+import {
+  getRecentAdaptations,
+  getRecentlyAdaptedSessionDates,
+} from '@/lib/adaptations/queries'
 
 export const metadata = { title: 'Dashboard — Arcline' }
 
@@ -86,7 +90,7 @@ export default async function DashboardPage() {
   const now = new Date()
   const eightWeeksAgo = new Date(+now - 56 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
-  const [planResult, sessionsResult] = await Promise.all([
+  const [planResult, sessionsResult, recentAdaptations] = await Promise.all([
     supabase
       .from('plans')
       .select('*')
@@ -101,10 +105,12 @@ export default async function DashboardPage() {
       .eq('user_id', user.id)
       .gte('session_date', eightWeeksAgo)
       .order('session_date', { ascending: false }),
+    getRecentAdaptations(supabase, user.id),
   ])
 
   const typedPlan = planResult.data as Plan | null
   const sessions = (sessionsResult.data ?? []) as TrainingSession[]
+  const adaptedDates = getRecentlyAdaptedSessionDates(recentAdaptations)
 
   const weekIndex = typedPlan ? getCurrentWeekIndex(typedPlan) : 0
   const currentWeek = typedPlan?.weeks[weekIndex]
@@ -154,7 +160,13 @@ export default async function DashboardPage() {
       )}
 
       {/* Current week sessions */}
-      {currentWeek && <PlanWeekView week={currentWeek} />}
+      {currentWeek && (
+        <PlanWeekView
+          week={currentWeek}
+          adaptedDates={adaptedDates}
+          adaptations={recentAdaptations}
+        />
+      )}
 
       {/* Load trend */}
       <div className="mt-8">

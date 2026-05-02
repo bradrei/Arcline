@@ -1,8 +1,15 @@
 'use client'
 
-import Link from 'next/link'
+import { useState } from 'react'
 import { motion } from 'framer-motion'
-import type { PlanSession } from '@/types'
+import type { Adaptation, PlanSession } from '@/types'
+import { SessionDetailSheet } from './SessionDetailSheet'
+
+interface AnimatedSessionCardsProps {
+  sessions: PlanSession[]
+  adaptedDates?: Set<string>
+  adaptations?: Adaptation[]
+}
 
 const TYPE_LABEL: Record<string, string> = {
   swim: 'SWIM', bike: 'BIKE', run: 'RUN', brick: 'BRICK',
@@ -33,11 +40,37 @@ function formatDuration(min: number): string {
   return m === 0 ? `${h}h` : `${h}h ${m}m`
 }
 
-function SessionCard({ session }: { session: PlanSession }) {
+function PulseDot() {
+  return (
+    <motion.span
+      aria-label="Recently adapted"
+      className="absolute right-3 top-3 h-2 w-2 rounded-full bg-brand-teal shadow-[0_0_0_2px_rgba(0,212,168,0.25)]"
+      animate={{ scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }}
+      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+    />
+  )
+}
+
+function SessionCard({
+  session,
+  isAdapted,
+  onOpen,
+}: {
+  session: PlanSession
+  isAdapted: boolean
+  onOpen: () => void
+}) {
   const isRest = session.type === 'rest'
   const typeColor = TYPE_COLOR[session.type] ?? TYPE_COLOR.other
   return (
-    <div className={`flex w-52 flex-shrink-0 flex-col gap-3 rounded-2xl border border-white/10 bg-surface p-4 ${isRest ? 'opacity-50' : ''}`}>
+    <button
+      type="button"
+      onClick={onOpen}
+      className={`relative flex w-52 flex-shrink-0 flex-col gap-3 rounded-2xl border border-white/10 bg-surface p-4 text-left transition hover:border-white/20 ${
+        isRest ? 'opacity-50' : ''
+      }`}
+    >
+      {isAdapted && <PulseDot />}
       <div className="flex items-center justify-between">
         <span className={`rounded-lg px-2 py-1 text-xs font-bold tracking-wide ${typeColor}`}>
           {TYPE_LABEL[session.type] ?? session.type.toUpperCase()}
@@ -55,17 +88,10 @@ function SessionCard({ session }: { session: PlanSession }) {
             </span>
           </div>
           <p className="line-clamp-3 text-xs leading-relaxed text-foreground-muted">{session.description}</p>
-          <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }} className="mt-auto">
-            <Link
-              href="/app/log"
-              className="block rounded-xl border border-brand-teal/20 bg-brand-teal/10 px-3 py-2 text-center text-xs font-semibold text-brand-teal transition hover:bg-brand-teal/20"
-            >
-              Log this session
-            </Link>
-          </motion.div>
+          <p className="mt-auto text-[11px] font-medium text-brand-teal">View details →</p>
         </>
       )}
-    </div>
+    </button>
   )
 }
 
@@ -78,24 +104,52 @@ const cardVariants = {
   show: { opacity: 1, y: 0 },
 }
 
-export function AnimatedSessionCards({ sessions }: { sessions: PlanSession[] }) {
+export function AnimatedSessionCards({
+  sessions,
+  adaptedDates,
+  adaptations = [],
+}: AnimatedSessionCardsProps) {
+  const [openSession, setOpenSession] = useState<PlanSession | null>(null)
+  const sheetAdaptations = openSession?.date
+    ? adaptations.filter(a =>
+        (a.plan_after?.weeks ?? []).some(w =>
+          (w.sessions ?? []).some(s => s.date === openSession.date),
+        ),
+      )
+    : []
+
   return (
-    <motion.div
-      className="flex gap-3"
-      style={{ width: 'max-content' }}
-      variants={containerVariants}
-      initial="hidden"
-      animate="show"
-    >
-      {sessions.map((session, i) => (
-        <motion.div
-          key={`${session.day}-${i}`}
-          variants={cardVariants}
-          transition={{ type: 'spring', stiffness: 280, damping: 26 }}
-        >
-          <SessionCard session={session} />
-        </motion.div>
-      ))}
-    </motion.div>
+    <>
+      <motion.div
+        className="flex gap-3"
+        style={{ width: 'max-content' }}
+        variants={containerVariants}
+        initial="hidden"
+        animate="show"
+      >
+        {sessions.map((session, i) => {
+          const isAdapted = Boolean(session.date && adaptedDates?.has(session.date))
+          return (
+            <motion.div
+              key={`${session.day}-${i}`}
+              variants={cardVariants}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+            >
+              <SessionCard
+                session={session}
+                isAdapted={isAdapted}
+                onOpen={() => setOpenSession(session)}
+              />
+            </motion.div>
+          )
+        })}
+      </motion.div>
+      <SessionDetailSheet
+        open={openSession !== null}
+        session={openSession}
+        adaptations={sheetAdaptations}
+        onClose={() => setOpenSession(null)}
+      />
+    </>
   )
 }

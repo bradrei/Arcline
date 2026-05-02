@@ -2,6 +2,10 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Plan } from '@/types'
 import { PlanWeekView } from '@/components/PlanWeekView'
+import {
+  getRecentAdaptations,
+  getRecentlyAdaptedSessionDates,
+} from '@/lib/adaptations/queries'
 
 export const metadata = { title: 'Your plan — Arcline' }
 
@@ -12,16 +16,20 @@ export default async function PlanPage() {
   } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const { data: plan } = await supabase
-    .from('plans')
-    .select('*')
-    .eq('user_id', user.id)
-    .eq('status', 'active')
-    .order('generated_at', { ascending: false })
-    .limit(1)
-    .single()
+  const [planResult, recentAdaptations] = await Promise.all([
+    supabase
+      .from('plans')
+      .select('*')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .order('generated_at', { ascending: false })
+      .limit(1)
+      .single(),
+    getRecentAdaptations(supabase, user.id),
+  ])
 
-  const typedPlan = plan as Plan | null
+  const typedPlan = planResult.data as Plan | null
+  const adaptedDates = getRecentlyAdaptedSessionDates(recentAdaptations)
   const goalDescription = typedPlan?.goal_anchor
     ? (typedPlan.goal_anchor as { goal_description?: string }).goal_description
     : null
@@ -59,7 +67,11 @@ export default async function PlanPage() {
                   </h2>
                   <span className="text-xs text-foreground-muted">{durationLabel} training</span>
                 </div>
-                <PlanWeekView week={week} />
+                <PlanWeekView
+                  week={week}
+                  adaptedDates={adaptedDates}
+                  adaptations={recentAdaptations}
+                />
               </div>
             )
           })}
