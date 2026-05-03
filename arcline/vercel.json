@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/regenerate-plans",
-      "schedule": "*/10 * * * *"
+      "schedule": "0 3 * * *"
     },
     {
       "path": "/api/cron/retry-adaptations",

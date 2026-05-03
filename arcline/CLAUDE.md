@@ -51,8 +51,8 @@ arcline/
       plan/page.tsx               ← /app/plan (all-weeks PlanWeekView, animated session cards)
       settings/integrations/page.tsx ← Strava connect/disconnect UI
     api/coach/chat/route.ts       ← POST: HC2 + rate limit + streaming Claude response
-    api/cron/regenerate-plans/route.ts ← Vercel cron (10min), retries fallback plans, abandons after 3
-    api/cron/retry-adaptations/route.ts ← Vercel cron (daily), retries failed adaptations, abandons after 5
+    api/cron/regenerate-plans/route.ts ← Vercel cron (daily 03:00 UTC), retries fallback plans, abandons after 3
+    api/cron/retry-adaptations/route.ts ← Vercel cron (daily 04:00 UTC), retries failed adaptations, abandons after 5
   app/admin/hc2/page.tsx          ← founder-gated; lists hc2_false_positives + injury_flags via service role
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
@@ -216,7 +216,7 @@ Accounts, API keys, project setup. (Completed before this repo.)
 - Plan timeline loading skeleton — `PlanTimelineView` only mounts via the indicator button click, and the indicator only renders when a plan exists; no mid-state to show.
 
 **Decisions not in prompt:**
-- Cron retry interval: prompt says "every 10 minutes." Implemented via `*/10 * * * *` in `vercel.json`. Vercel free-tier crons fire on the minute; this is fine.
+- Cron retry interval: prompt says "every 10 minutes." Vercel Hobby tier rejects sub-daily crons at deploy time, so the plan-regen cron now runs daily at 03:00 UTC instead. The 24h max wait for fallback plans is acceptable for v1; Session 14's manual "Regenerate now" button fills the immediacy gap. Bump back to `*/10 * * * *` if/when the project moves to Pro.
 - Adaptation retry: prompt didn't specify cadence. Set to daily at 04:00 UTC — adaptations are not time-critical (they only matter for the next session, typically 24+ hours away after a logged session).
 - Cron auth uses a `CRON_SECRET` env var rather than IP-allowlisting Vercel's cron sender. Standard pattern; the founder needs to add `CRON_SECRET` to Vercel before the routes will function.
 - Service role client used in admin route. Without it, RLS would scope `hc2_false_positives` to the founder's own user_id only, defeating the purpose of the admin view. The `FOUNDER_EMAIL` check is the gate.
