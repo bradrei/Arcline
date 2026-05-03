@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { getActivity, mapStravaToSession, type StravaToken } from '@/lib/strava/client'
+import { getActivity, mapStravaToSession, StravaReauthRequiredError, type StravaToken } from '@/lib/strava/client'
 import { detectInjury } from '@/lib/ai/detectInjury'
 import { saveSessionAndTriggerAdaptation } from '@/lib/sessions/save'
 
@@ -86,6 +86,13 @@ export async function POST(request: NextRequest) {
     await saveSessionAndTriggerAdaptation(supabase, userId, sessionData)
   } catch (err) {
     console.error('Webhook activity processing failed:', err)
+    // Reauth-required → flag the profile so the user sees a reconnect banner
+    if (err instanceof StravaReauthRequiredError) {
+      await supabase
+        .from('profiles')
+        .update({ strava_needs_reauth: true })
+        .eq('id', userId)
+    }
     // Return 200 so Strava does not retry — log failure for manual review
   }
 

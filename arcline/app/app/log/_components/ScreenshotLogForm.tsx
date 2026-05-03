@@ -128,31 +128,35 @@ export function ScreenshotLogForm() {
   async function doConfirmSave() {
     if (!confirmForm) return
     setIsSaving(true)
-
-    const result = await confirmSession({
-      session_date: confirmForm.session_date,
-      session_type: confirmForm.session_type,
-      duration_min: Number(confirmForm.duration_min) || 0,
-      distance_km: confirmForm.distance_km ? Number(confirmForm.distance_km) : null,
-      avg_hr: confirmForm.avg_hr ? Number(confirmForm.avg_hr) : null,
-      max_hr: confirmForm.max_hr ? Number(confirmForm.max_hr) : null,
-      rpe: null,
-      avg_pace: confirmForm.avg_pace || null,
-      power_watts: null,
-      notes: confirmForm.notes || null,
-    })
-
-    setIsSaving(false)
-    if (result.error) {
-      setSaveError(result.error)
-    } else {
-      setSuccess(true)
-      triggerSessionComplete({
-        duration_min: Number(confirmForm?.duration_min ?? 0),
-        distance_km: confirmForm?.distance_km ? Number(confirmForm.distance_km) : null,
+    try {
+      const result = await confirmSession({
+        session_date: confirmForm.session_date,
+        session_type: confirmForm.session_type,
+        duration_min: Number(confirmForm.duration_min) || 0,
+        distance_km: confirmForm.distance_km ? Number(confirmForm.distance_km) : null,
+        avg_hr: confirmForm.avg_hr ? Number(confirmForm.avg_hr) : null,
+        max_hr: confirmForm.max_hr ? Number(confirmForm.max_hr) : null,
         rpe: null,
+        avg_pace: confirmForm.avg_pace || null,
+        power_watts: null,
+        notes: confirmForm.notes || null,
       })
-      setAdaptationPending(true)
+
+      if (result.error) {
+        setSaveError(result.error)
+      } else {
+        setSuccess(true)
+        triggerSessionComplete({
+          duration_min: Number(confirmForm?.duration_min ?? 0),
+          distance_km: confirmForm?.distance_km ? Number(confirmForm.distance_km) : null,
+          rpe: null,
+        })
+        setAdaptationPending(true)
+      }
+    } catch {
+      setSaveError("Couldn't save right now. Try again.")
+    } finally {
+      setIsSaving(false)
     }
   }
 

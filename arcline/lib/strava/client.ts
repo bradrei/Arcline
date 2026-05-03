@@ -23,6 +23,13 @@ interface StravaActivity {
   average_watts?: number
 }
 
+export class StravaReauthRequiredError extends Error {
+  constructor(message = 'Strava token refresh failed — user must reauthorize') {
+    super(message)
+    this.name = 'StravaReauthRequiredError'
+  }
+}
+
 async function refreshIfNeeded(token: StravaToken): Promise<StravaToken> {
   if (Date.now() / 1000 < token.expires_at - 60) return token
 
@@ -37,7 +44,7 @@ async function refreshIfNeeded(token: StravaToken): Promise<StravaToken> {
     }),
   })
 
-  if (!res.ok) throw new Error('Strava token refresh failed')
+  if (!res.ok) throw new StravaReauthRequiredError()
 
   const data = await res.json() as {
     access_token: string

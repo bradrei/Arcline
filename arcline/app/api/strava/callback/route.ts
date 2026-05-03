@@ -31,12 +31,13 @@ export async function GET(request: NextRequest) {
       athlete_id: tokenData.athlete.id,
     }
 
-    // Store token + mark connected
+    // Store token + mark connected, clear reauth flag if it was set
     await supabase
       .from('profiles')
       .update({
         strava_connected: true,
         strava_token: stravaToken as unknown as Record<string, unknown>,
+        strava_needs_reauth: false,
       })
       .eq('id', user.id)
 

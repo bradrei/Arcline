@@ -24,9 +24,13 @@ CREATE TABLE IF NOT EXISTS profiles (
   onboarding_complete boolean DEFAULT false,
   strava_connected boolean DEFAULT false,
   strava_token jsonb, -- TODO [v2]: migrate to Supabase Vault for encrypted token storage
+  strava_needs_reauth boolean DEFAULT false,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
+
+-- Backfill column on existing tables (safe to re-run)
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS strava_needs_reauth boolean DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS plans (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -104,15 +108,38 @@ CREATE TABLE IF NOT EXISTS adaptation_queue (
   user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
   session_id uuid REFERENCES sessions(id) ON DELETE CASCADE,
   created_at timestamptz DEFAULT now(),
-  processed boolean DEFAULT false
+  processed boolean DEFAULT false,
+  attempt_count int DEFAULT 0,
+  last_attempted_at timestamptz,
+  abandoned boolean DEFAULT false,
+  last_error text
 );
+ALTER TABLE adaptation_queue ADD COLUMN IF NOT EXISTS attempt_count int DEFAULT 0;
+ALTER TABLE adaptation_queue ADD COLUMN IF NOT EXISTS last_attempted_at timestamptz;
+ALTER TABLE adaptation_queue ADD COLUMN IF NOT EXISTS abandoned boolean DEFAULT false;
+ALTER TABLE adaptation_queue ADD COLUMN IF NOT EXISTS last_error text;
 
 CREATE TABLE IF NOT EXISTS plan_generation_queue (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
   plan_id uuid REFERENCES plans(id) ON DELETE CASCADE,
-  status text DEFAULT 'pending', -- 'pending' | 'processing' | 'done' | 'failed'
-  created_at timestamptz DEFAULT now()
+  status text DEFAULT 'pending', -- 'pending' | 'processing' | 'done' | 'failed' | 'abandoned'
+  created_at timestamptz DEFAULT now(),
+  attempt_count int DEFAULT 0,
+  last_attempted_at timestamptz,
+  last_error text
+);
+ALTER TABLE plan_generation_queue ADD COLUMN IF NOT EXISTS attempt_count int DEFAULT 0;
+ALTER TABLE plan_generation_queue ADD COLUMN IF NOT EXISTS last_attempted_at timestamptz;
+ALTER TABLE plan_generation_queue ADD COLUMN IF NOT EXISTS last_error text;
+
+CREATE TABLE IF NOT EXISTS plan_generation_failures (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  plan_id uuid REFERENCES plans(id) ON DELETE CASCADE,
+  attempts int,
+  last_error text,
+  failed_at timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS coach_messages (
@@ -139,6 +166,7 @@ ALTER TABLE injury_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hc2_false_positives ENABLE ROW LEVEL SECURITY;
 ALTER TABLE adaptation_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_generation_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE plan_generation_failures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coach_messages ENABLE ROW LEVEL SECURITY;
 -- waitlist: no RLS (server-side only via service role key)
 
@@ -166,6 +194,9 @@ CREATE POLICY "own adaptation queue" ON adaptation_queue FOR ALL USING (auth.uid
 
 DROP POLICY IF EXISTS "own plan generation queue" ON plan_generation_queue;
 CREATE POLICY "own plan generation queue" ON plan_generation_queue FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own plan generation failures" ON plan_generation_failures;
+CREATE POLICY "own plan generation failures" ON plan_generation_failures FOR SELECT USING (auth.uid() = user_id);
 
 DROP POLICY IF EXISTS "own coach messages" ON coach_messages;
 CREATE POLICY "own coach messages" ON coach_messages FOR ALL USING (auth.uid() = user_id);

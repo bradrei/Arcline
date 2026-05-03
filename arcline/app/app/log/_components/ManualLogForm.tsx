@@ -105,18 +105,23 @@ export function ManualLogForm() {
 
   async function doSave(data: ManualSessionInput) {
     setIsLoading(true)
-    const result = await logManualSession(data)
-    setIsLoading(false)
-    if (result.error) {
-      setError(result.error)
-    } else {
-      setSuccess(true)
-      triggerSessionComplete({
-        duration_min: data.duration_min,
-        distance_km: data.distance_km,
-        rpe: data.rpe,
-      })
-      setAdaptationPending(true)
+    try {
+      const result = await logManualSession(data)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        setSuccess(true)
+        triggerSessionComplete({
+          duration_min: data.duration_min,
+          distance_km: data.distance_km,
+          rpe: data.rpe,
+        })
+        setAdaptationPending(true)
+      }
+    } catch {
+      setError("Couldn't save right now. Try again.")
+    } finally {
+      setIsLoading(false)
     }
   }
 

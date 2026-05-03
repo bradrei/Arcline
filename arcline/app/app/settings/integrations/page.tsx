@@ -19,11 +19,12 @@ export default async function IntegrationsPage({
 
   const { data: profile } = await supabase
     .from('profiles')
-    .select('strava_connected')
+    .select('strava_connected, strava_needs_reauth')
     .eq('id', user.id)
     .single()
 
   const stravaConnected = profile?.strava_connected ?? false
+  const stravaNeedsReauth = Boolean(profile?.strava_needs_reauth)
 
   const stravaConfigured =
     process.env.STRAVA_CLIENT_ID && !process.env.STRAVA_CLIENT_ID.startsWith('your-')
@@ -48,6 +49,16 @@ export default async function IntegrationsPage({
         <div className="mb-6 rounded-xl border border-brand-teal/20 bg-brand-teal/5 px-4 py-3">
           <p className="text-sm text-brand-teal">
             Strava connected — last 10 activities imported.
+          </p>
+        </div>
+      )}
+      {stravaNeedsReauth && (
+        <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-300">
+            Your Strava connection needs to be reauthorized.
+          </p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Reconnect to keep syncing — webhook activity is paused until you do.
           </p>
         </div>
       )}

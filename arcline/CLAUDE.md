@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 12 — May 2026  
-**Next session:** Session 13 — Polish + founder-readiness (regenerate-plan trigger for fallback users, edge-case sweep, manual deploy checklist)
+**Last completed session:** Session 13 — May 2026  
+**Next session:** Session 14 — Founder-facing regenerate-plan trigger (UI button on the dashboard fallback banner, calling the same path as the cron retry), production deploy checklist, dogfood pass
 
 ---
 
@@ -51,6 +51,9 @@ arcline/
       plan/page.tsx               ← /app/plan (all-weeks PlanWeekView, animated session cards)
       settings/integrations/page.tsx ← Strava connect/disconnect UI
     api/coach/chat/route.ts       ← POST: HC2 + rate limit + streaming Claude response
+    api/cron/regenerate-plans/route.ts ← Vercel cron (10min), retries fallback plans, abandons after 3
+    api/cron/retry-adaptations/route.ts ← Vercel cron (daily), retries failed adaptations, abandons after 5
+  app/admin/hc2/page.tsx          ← founder-gated; lists hc2_false_positives + injury_flags via service role
     favicon.ico
     globals.css                   ← Tailwind v4 + Arcline brand tokens
     layout.tsx                    ← root layout (Geist font, metadata)
@@ -101,10 +104,9 @@ components/
 ```
 
 ### What is NOT built yet
-- Adaptation queue processor (adaptation_queue rows written, never consumed) — future session
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Manual "regenerate plan with AI" trigger when current plan is `is_fallback=true` — Session 12
-- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — Session 12
+- Founder-facing manual "regenerate plan with AI" button on the dashboard fallback banner — Session 14 (cron-side retry now exists; just needs a UI trigger)
+- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — TBD
 - Dogfood run: founder using real app end-to-end — blocked on Anthropic credits being added to the Vercel env
 
 ---
@@ -177,6 +179,57 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 13 — May 2026
+**Completed:**
+- Schema: `supabase/schema.sql` updated with retry tracking and failure logging.
+  - `profiles.strava_needs_reauth boolean` (idempotent `ALTER TABLE … ADD COLUMN IF NOT EXISTS`).
+  - `adaptation_queue` extended: `attempt_count`, `last_attempted_at`, `abandoned`, `last_error`.
+  - `plan_generation_queue` extended: `attempt_count`, `last_attempted_at`, `last_error`. Added `'abandoned'` to status values.
+  - New table `plan_generation_failures` (user_id, plan_id, attempts, last_error, failed_at). Receives one row when a plan regeneration is permanently abandoned.
+  - RLS enabled on `plan_generation_failures` with a SELECT-only policy for `auth.uid() = user_id`. Inserts go through service role from the cron route.
+- `app/api/cron/regenerate-plans/route.ts` — Vercel cron, every 10 minutes:
+  - `GET` handler authorised via `Authorization: Bearer ${CRON_SECRET}` header (Vercel cron supplies this).
+  - Pulls up to 5 pending rows from `plan_generation_queue` where `attempt_count < 3`.
+  - Per row: increment attempt count, mark processing, fetch profile, call `generatePlan(profile)`. If real AI plan returned: archive previous plan and insert new active plan. If still fallback after 3 attempts: insert `plan_generation_failures` row, mark queue row `abandoned`. Errors recorded to `last_error`.
+  - Uses service role client (bypasses RLS — required since cron has no user session).
+- `app/api/cron/retry-adaptations/route.ts` — Vercel cron, daily at 04:00 UTC:
+  - Same auth pattern.
+  - Pulls up to 10 unprocessed, non-abandoned `adaptation_queue` rows where `attempt_count < 5`.
+  - Per row: increment attempt count, call `triggerAdaptationAsync(supabase, user_id, session_id)`. Marks `processed: true` on success; marks `abandoned: true` after 5 attempts.
+- `vercel.json` — declares both crons with their schedules. New file.
+- `lib/strava/client.ts` — replaced the generic `Error('Strava token refresh failed')` with a typed `StravaReauthRequiredError` class. Exported from the module.
+- `app/api/strava/webhook/route.ts` — catches `StravaReauthRequiredError` and writes `strava_needs_reauth: true` on the user's profile. Continues to return 200 so Strava does not retry indefinitely.
+- `app/api/strava/callback/route.ts` — successful reconnect now writes `strava_needs_reauth: false` alongside the new token.
+- `app/app/settings/integrations/page.tsx` — fetches `strava_needs_reauth` and renders an amber banner: "Your Strava connection needs to be reauthorized. Reconnect to keep syncing — webhook activity is paused until you do." The existing Connect button is the action.
+- `app/admin/hc2/page.tsx` — founder-only admin route:
+  - `force-dynamic`. Redirects to `/login` if no user, then redirects to `/` if `user.email !== process.env.FOUNDER_EMAIL`.
+  - Uses `createServiceClient()` to bypass RLS (so the founder sees every user's flags). Safe because the email gate runs before the service client is instantiated.
+  - Two tables: `hc2_false_positives` (the classifier-tuning loop) and recent `injury_flags` with status (Pending / Referred / Dismissed). User IDs displayed as 8-char prefix.
+- `app/app/log/_components/ManualLogForm.tsx` and `ScreenshotLogForm.tsx` — wrapped `doSave` / `doConfirmSave` in `try/catch/finally`. Network-level failure (server action throw) now shows "Couldn't save right now. Try again." instead of an unhandled rejection. All form state preserved across the failure.
+- `types/index.ts` — `Profile.strava_needs_reauth?: boolean` added.
+
+**Deferred:**
+- Founder-facing UI button to manually trigger plan regeneration for the current user — Session 14. The cron will pick fallback plans up automatically, but Bradley wants a button on the fallback banner for immediate feedback. Easy to add: a server action that inserts/updates a row in `plan_generation_queue` with `attempt_count = 0` so the next cron picks it up, plus an optional immediate call.
+- Founder email notification when a plan is permanently abandoned — currently logged to `plan_generation_failures` table for manual review (matches the prompt: "log it to a plan_generation_failures table for manual review"). Hooking up Resend/Postmark deferred until we have the deploy checklist.
+- Empty-state pass on `LoadTrendGraph` when `data.length === 0` — already exists from Session 8 ("< 2 data points: empty state label"). Verified by inspection — no changes needed.
+- Plan timeline loading skeleton — `PlanTimelineView` only mounts via the indicator button click, and the indicator only renders when a plan exists; no mid-state to show.
+
+**Decisions not in prompt:**
+- Cron retry interval: prompt says "every 10 minutes." Implemented via `*/10 * * * *` in `vercel.json`. Vercel free-tier crons fire on the minute; this is fine.
+- Adaptation retry: prompt didn't specify cadence. Set to daily at 04:00 UTC — adaptations are not time-critical (they only matter for the next session, typically 24+ hours away after a logged session).
+- Cron auth uses a `CRON_SECRET` env var rather than IP-allowlisting Vercel's cron sender. Standard pattern; the founder needs to add `CRON_SECRET` to Vercel before the routes will function.
+- Service role client used in admin route. Without it, RLS would scope `hc2_false_positives` to the founder's own user_id only, defeating the purpose of the admin view. The `FOUNDER_EMAIL` check is the gate.
+- Strava reauth detection scope: only the webhook flips the flag. The OAuth callback path explicitly clears it. Bulk import in callback is a "fresh token" path and won't see expired-token errors. If we ever fetch Strava data outside the webhook (e.g., a manual sync button) we'll need to thread the same catch.
+- Form retention: ManualLogForm already preserved state; the `try/catch` is purely defensive against fetch-level failures (offline, mid-flight network drop). Validation errors and server-action `result.error` paths are unchanged.
+- The prompt names the fallback function `generateStarterPlan()`. Codebase has `generateFallbackPlan()` since Session 3. Keeping the existing name. The cron route calls `generatePlan(profile)` which internally falls back to `generateFallbackPlan` on AI failure — semantics match.
+- Did not build a regenerate-plan UI button this session. Reason: the prompt scope is wide (audit, queue retry, Strava refresh, admin, etc.); ship the infrastructure first, then the UI trigger. Cron will pick up Bradley's fallback plan on the next scheduled run anyway as soon as `ANTHROPIC_API_KEY` is loaded — no manual action needed for v1 dogfood.
+
+**Requires manual setup before this works in prod:**
+- Re-run `supabase/schema.sql` in the Supabase SQL editor (idempotent — safe on existing schema).
+- Add to Vercel env: `CRON_SECRET` (any random string), `FOUNDER_EMAIL=bradreilly9@gmail.com`.
+- Vercel cron jobs activate automatically once `vercel.json` is deployed; nothing to configure in the dashboard.
+- For the cron routes to do useful work, `ANTHROPIC_API_KEY` must be set with credits.
 
 ### Session 12 — May 2026
 **Completed:**

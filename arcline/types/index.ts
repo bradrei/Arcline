@@ -58,6 +58,7 @@ export interface Profile {
   onboarding_complete: boolean
   strava_connected: boolean
   strava_token: Record<string, unknown> | null
+  strava_needs_reauth?: boolean
   created_at: string
   updated_at: string
 }
