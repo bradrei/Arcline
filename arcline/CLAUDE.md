@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 13 — May 2026  
-**Next session:** Session 14 — Founder-facing regenerate-plan trigger (UI button on the dashboard fallback banner, calling the same path as the cron retry), production deploy checklist, dogfood pass
+**Last completed session:** Session 14 — May 2026  
+**Next session:** Dogfood — founder uses the app for 2 consecutive weeks against the DOGFOOD.md protocol. No new build session until after that signal.
 
 ---
 
@@ -33,7 +33,8 @@ arcline/
         AppNav.tsx                ← sticky bottom nav (Dashboard / Plan / Log / Coach)
         InjuryHydrator.tsx        ← client component, hydrates Zustand from server-detected injury flags
         AdaptationPoller.tsx      ← polls adaptations table, fires AdaptationToast
-      layout.tsx                  ← /app/* shell layout + AppNav + global toasts/animations
+        FounderBugLog.tsx         ← floating bug button + modal, founder-only (mounted from layout)
+      layout.tsx                  ← /app/* shell layout + AppNav + global toasts/animations + founder bug log
       onboarding/page.tsx         ← /app/onboarding
       dashboard/page.tsx          ← /app/dashboard (current week PlanWeekView)
       coach/
@@ -49,7 +50,8 @@ arcline/
           ManualLogForm.tsx       ← method 1: form with HC2 + save
           ScreenshotLogForm.tsx   ← method 2: upload → extract → confirm
       plan/page.tsx               ← /app/plan (all-weeks PlanWeekView, animated session cards)
-      settings/integrations/page.tsx ← Strava connect/disconnect UI
+      settings/page.tsx           ← /app/settings (regenerate plan, link to integrations)
+      settings/integrations/page.tsx ← Strava connect/disconnect/import-90d UI
     api/coach/chat/route.ts       ← POST: HC2 + rate limit + streaming Claude response
     api/cron/regenerate-plans/route.ts ← Vercel cron (daily 03:00 UTC), retries fallback plans, abandons after 3
     api/cron/retry-adaptations/route.ts ← Vercel cron (daily 04:00 UTC), retries failed adaptations, abandons after 5
@@ -85,8 +87,10 @@ arcline/
     sessions/
       actions.ts                  ← checkSessionInjury, logManualSession, extractScreenshot, confirmSession, disconnectStrava
       save.ts                     ← saveSessionAndTriggerAdaptation (shared across all 3 log methods)
+    founder/actions.ts            ← submitFounderBug (FOUNDER_EMAIL-gated, service-role insert)
     strava/
-      client.ts                   ← exchangeToken, getActivity, getAthleteActivities, mapStravaToSession, retry logic
+      client.ts                   ← exchangeToken, getActivity, getAthleteActivities, mapStravaToSession, retry logic, StravaReauthRequiredError
+      importHistory.ts            ← importStravaHistory: paginated 90-day bulk import (no HC2)
     supabase/
       client.ts                   ← createBrowserClient wrapper
       middleware.ts               ← updateSession utility (used by proxy.ts)
@@ -105,9 +109,8 @@ components/
 
 ### What is NOT built yet
 - Schedule-change trigger exposure (missed/reduced/extended/added) — future session
-- Founder-facing manual "regenerate plan with AI" button on the dashboard fallback banner — Session 14 (cron-side retry now exists; just needs a UI trigger)
-- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — TBD
-- Dogfood run: founder using real app end-to-end — blocked on Anthropic credits being added to the Vercel env
+- Production deployment (Vercel + env vars, Supabase storage bucket, Strava webhook) — manual setup steps documented in DOGFOOD.md
+- Dogfood run: founder using real app end-to-end — protocol now documented in DOGFOOD.md; gated only on Anthropic credits being loaded
 
 ---
 
@@ -179,6 +182,42 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Session 14 — May 2026
+**Completed:**
+- Schema: `founder_bug_log` table (page_url, message, user_agent, status, created_at). RLS enabled with no public policy — only the service role can read/write. Writes go through `lib/founder/actions.ts` after the `FOUNDER_EMAIL` gate.
+- `lib/strava/client.ts` — `getAthleteActivities()` accepts an options object `{ perPage, after, page }` (legacy number param still works). Uses `URLSearchParams` to compose the query.
+- `lib/strava/importHistory.ts` — `'server-only'` helper. `importStravaHistory(supabase, userId, token, days)` paginates the Strava activities API (100/page, max 5 pages = 500 activities cap), inserts non-duplicates via `strava_activity_id` lookup, and persists any refreshed token back to the profile. Returns `{ imported, skipped, pages }`.
+- `lib/sessions/actions.ts` — new `importStravaHistory90()` server action: auth check → load profile.strava_token → call importHistory → redirect with status searchParams. On `StravaReauthRequiredError`, flips `strava_needs_reauth=true` and redirects with `?error=strava_reauth`.
+- `lib/onboarding/actions.ts` — new `regenerateActivePlan()` server action: archives any active plan, calls `generatePlan(profile)`, inserts result. If still `is_fallback`, queues another attempt for the cron. Redirects to dashboard with `?plan=regenerated` or `?plan=fallback`.
+- `app/app/settings/page.tsx` — new settings root. `force-dynamic`, `maxDuration = 60`. Shows current plan summary (version, week count, AI vs fallback), session count, "Regenerate my plan with full history" button, and a link to integrations. Surfaces error states from the regenerate action.
+- `app/app/settings/integrations/page.tsx` — added "Import last 90 days from Strava" button + form action. New status banners for `strava=imported&imported=N&skipped=M`, `error=strava_not_connected`, `error=strava_reauth`. `maxDuration = 60`.
+- `lib/founder/actions.ts` — `submitFounderBug(message, pageUrl, userAgent)`: auth + FOUNDER_EMAIL gate, then inserts via service-role client (bypasses RLS). Slices each field to safe max lengths.
+- `app/app/_components/FounderBugLog.tsx` — floating amber bug button (bottom-right, fixed, z-30) + modal with autofocused textarea. AnimatePresence backdrop + spring sheet (matches SessionDetailSheet pattern). ESC + backdrop dismiss. Submits, shows "Logged. Thanks for tagging it." then dismisses. Captures `window.location.href` and `navigator.userAgent` automatically.
+- `app/app/layout.tsx` — checks `user.email === process.env.FOUNDER_EMAIL` server-side and conditionally renders `<FounderBugLog />`. Non-founders never see the button or its bundled JS — the prop is `false` so the JSX branch is dropped.
+- `DOGFOOD.md` — created at repo root. Daily routine, what-to-test checklist, marketing capture cues, "ready for external beta" definition, founder bug button instructions, Strava bootstrap steps, troubleshooting pointers, full Vercel env var inventory.
+
+**Deferred:**
+- Adaptation trigger after import — the prompt's example imports activities and runs HC2 fire-and-forget, but does NOT trigger adaptations per activity (matches Session 5's "bulk import skips adaptation trigger" decision). The user runs `regenerateActivePlan()` manually after import to absorb the new context. Reasonable for v1; could automate in a future session.
+- HC2 on bulk-imported activities. Decision: skip. Rationale below.
+- Founder bug log review UI — currently SQL-only review (instructions in DOGFOOD.md). A `/admin/bugs` page mirroring `/admin/hc2` would be obvious next polish, but no urgency until the bug log has activity.
+
+**Decisions not in prompt:**
+- Bulk Strava import does NOT run HC2 per activity. Reasoning: 90-day-old activity descriptions aren't actionable (the founder already knows what their body did 60 days ago); HC2 fires going forward via the webhook, which is what matters. Awaiting 100 HC2 calls inside a 60s server action also risks Vercel function timeout. Documented in `lib/strava/importHistory.ts` header comment.
+- `getAthleteActivities` keeps a backwards-compatible signature: callers can pass either a number (legacy `perPage`) or the new options object. Means the existing OAuth callback (`getAthleteActivities(stravaToken, 10)`) didn't need to change.
+- 500-activity hard cap on import (5 pages × 100). For 90 days even 4-a-day athletes don't hit this.
+- `regenerateActivePlan` re-queues the result if it still came back as a fallback. Otherwise the user clicks "Regenerate", sees "Plan still tailoring", and has no path forward except waiting 24h for the cron. The re-queue lets the next cron tick pick it up automatically.
+- Founder bug log uses the **service role** client for writes. With RLS enabled and no policy, normal authenticated clients can't write — only the explicitly-gated server action can. Belt-and-braces: even if the action ran for a non-founder, the email gate would short-circuit before the insert.
+- Bug button position: `bottom-20 right-4` keeps it clear of the AppNav (which is `sticky bottom-0` ~56px tall). Z-30 sits below z-40 modals (InjuryGuard, SessionDetailSheet, PlanTimelineView) so it doesn't punch through them, but above page content.
+- Bug button color: amber (not teal). Visually distinct from the brand action color so the founder knows "this is for me, not a user feature".
+- The prompt's `subDays` from date-fns is replaced with manual `+new Date() - days * 86400000` math. No new dependency.
+- Settings page `maxDuration = 60` because `regenerateActivePlan` calls `generatePlan` which can chain multiple Anthropic calls for long plans (Session 11 chunked generation). 60s is the Hobby tier cap; for plans >50 weeks this could time out — fix for v2 by pushing regen to a queue.
+
+**Requires manual setup before this works in prod:**
+- Re-run `supabase/schema.sql` (idempotent — adds the `founder_bug_log` table only).
+- `FOUNDER_EMAIL` must already be set in Vercel from Session 13. Same email gates the bug button + admin route.
+- `ANTHROPIC_API_KEY` with credits is required for "Regenerate my plan" to produce a real (non-fallback) plan.
+- Strava integration requires `STRAVA_CLIENT_*` env vars before "Import last 90 days" works.
 
 ### Session 13 — May 2026
 **Completed:**

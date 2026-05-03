@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { AppNav } from './_components/AppNav'
 import { InjuryHydrator } from './_components/InjuryHydrator'
 import { AdaptationPoller } from './_components/AdaptationPoller'
+import { FounderBugLog } from './_components/FounderBugLog'
 import { AdaptationToast } from '@/components/gamification/AdaptationToast'
 import { SessionCompleteAnimation } from '@/components/gamification/SessionCompleteAnimation'
 import type { InjurySource } from '@/types'
@@ -24,6 +25,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     injuryFlag = data
   }
 
+  const founderEmail = process.env.FOUNDER_EMAIL
+  const isFounder = Boolean(founderEmail && user?.email === founderEmail)
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       {injuryFlag && (
@@ -36,6 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <AdaptationToast />
       <SessionCompleteAnimation />
       {children}
+      {isFounder && <FounderBugLog />}
       <AppNav />
     </div>
   )

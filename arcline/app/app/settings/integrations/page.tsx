@@ -1,14 +1,20 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { disconnectStrava } from '@/lib/sessions/actions'
+import { disconnectStrava, importStravaHistory90 } from '@/lib/sessions/actions'
 
 export const metadata = { title: 'Integrations — Arcline' }
+export const maxDuration = 60
 
 export default async function IntegrationsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; strava?: string }>
+  searchParams: Promise<{
+    error?: string
+    strava?: string
+    imported?: string
+    skipped?: string
+  }>
 }) {
   const params = await searchParams
   const supabase = await createClient()
@@ -49,6 +55,30 @@ export default async function IntegrationsPage({
         <div className="mb-6 rounded-xl border border-brand-teal/20 bg-brand-teal/5 px-4 py-3">
           <p className="text-sm text-brand-teal">
             Strava connected — last 10 activities imported.
+          </p>
+        </div>
+      )}
+      {params.strava === 'imported' && (
+        <div className="mb-6 rounded-xl border border-brand-teal/20 bg-brand-teal/5 px-4 py-3">
+          <p className="text-sm text-brand-teal">
+            Imported {params.imported ?? '0'} new session
+            {params.imported === '1' ? '' : 's'}
+            {params.skipped && Number(params.skipped) > 0
+              ? ` (${params.skipped} already in your log)`
+              : ''}
+            .
+          </p>
+        </div>
+      )}
+      {params.error === 'strava_not_connected' && (
+        <div className="mb-6 rounded-xl border border-red-400/20 bg-red-400/5 px-4 py-3">
+          <p className="text-sm text-red-400">Connect Strava first.</p>
+        </div>
+      )}
+      {params.error === 'strava_reauth' && (
+        <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
+          <p className="text-sm text-amber-300">
+            Your Strava token expired during import. Reconnect to continue.
           </p>
         </div>
       )}
@@ -112,9 +142,24 @@ export default async function IntegrationsPage({
         </div>
 
         {stravaConnected && (
-          <p className="mt-4 text-xs text-foreground-muted">
-            New Strava activities are imported automatically via webhook.
-          </p>
+          <>
+            <div className="mt-5 border-t border-white/5 pt-5">
+              <form action={importStravaHistory90}>
+                <button
+                  type="submit"
+                  className="rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-2.5 text-sm font-semibold text-brand-teal transition hover:bg-brand-teal/20 cursor-pointer"
+                >
+                  Import last 90 days from Strava
+                </button>
+              </form>
+              <p className="mt-2 text-xs text-foreground-muted">
+                One-time import to give your AI coach baseline context. Existing sessions are skipped.
+              </p>
+            </div>
+            <p className="mt-4 text-xs text-foreground-muted">
+              New Strava activities are imported automatically via webhook.
+            </p>
+          </>
         )}
       </div>
 

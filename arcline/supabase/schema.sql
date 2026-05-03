@@ -151,6 +151,15 @@ CREATE TABLE IF NOT EXISTS coach_messages (
   injury_flagged boolean DEFAULT false
 );
 
+CREATE TABLE IF NOT EXISTS founder_bug_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  page_url text,
+  message text,
+  user_agent text,
+  status text DEFAULT 'open', -- 'open' | 'resolved' | 'wontfix'
+  created_at timestamptz DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS coach_messages_user_created_idx
   ON coach_messages (user_id, created_at DESC);
 
@@ -168,7 +177,10 @@ ALTER TABLE adaptation_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_generation_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_generation_failures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coach_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE founder_bug_log ENABLE ROW LEVEL SECURITY;
 -- waitlist: no RLS (server-side only via service role key)
+-- founder_bug_log: RLS enabled with no public policy — writes go through service role
+--                  in lib/founder/actions.ts after the FOUNDER_EMAIL gate.
 
 -- Policies: DROP IF EXISTS then CREATE for idempotency on PG15
 DROP POLICY IF EXISTS "own profile" ON profiles;

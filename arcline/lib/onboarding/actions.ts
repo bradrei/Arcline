@@ -188,3 +188,43 @@ export async function completeOnboarding(
 
   redirect('/app/dashboard')
 }
+
+// ── Regenerate active plan with full profile + history ───────────────────────
+
+export async function regenerateActivePlan(): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single()
+  if (profileErr || !profile) redirect('/app/settings?error=profile_missing')
+
+  // Archive any active plan first so the new one is the only active row
+  await supabase
+    .from('plans')
+    .update({ status: 'archived' })
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+
+  const newPlan = await generatePlan(profile as Profile)
+  const { data: inserted, error: planErr } = await supabase
+    .from('plans')
+    .insert(newPlan)
+    .select('id')
+    .single()
+  if (planErr) redirect('/app/settings?error=plan_insert_failed')
+
+  // If the regenerated plan is still a fallback (Anthropic still down/quota out),
+  // queue another attempt for the cron.
+  if (newPlan.is_fallback && inserted) {
+    await supabase
+      .from('plan_generation_queue')
+      .insert({ user_id: user.id, plan_id: inserted.id, status: 'pending' })
+  }
+
+  redirect(newPlan.is_fallback ? '/app/dashboard?plan=fallback' : '/app/dashboard?plan=regenerated')
+}

@@ -5,6 +5,8 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { detectInjury } from '@/lib/ai/detectInjury'
 import { saveSessionAndTriggerAdaptation } from '@/lib/sessions/save'
+import { importStravaHistory } from '@/lib/strava/importHistory'
+import { StravaReauthRequiredError, type StravaToken } from '@/lib/strava/client'
 import type { NewSession, SessionType } from '@/types'
 
 // ── Injury check (session context — also pauses active plan) ─────────────────
@@ -245,4 +247,43 @@ export async function disconnectStrava(): Promise<void> {
     .eq('id', user.id)
 
   redirect('/app/settings/integrations')
+}
+
+// ── Strava bulk history import ───────────────────────────────────────────────
+
+export async function importStravaHistory90(): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('strava_connected, strava_token')
+    .eq('id', user.id)
+    .single()
+
+  if (!profile?.strava_connected || !profile.strava_token) {
+    redirect('/app/settings/integrations?error=strava_not_connected')
+  }
+
+  try {
+    const result = await importStravaHistory(
+      supabase,
+      user.id,
+      profile.strava_token as unknown as StravaToken,
+      90,
+    )
+    redirect(
+      `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,
+    )
+  } catch (err) {
+    if (err instanceof StravaReauthRequiredError) {
+      await supabase
+        .from('profiles')
+        .update({ strava_needs_reauth: true })
+        .eq('id', user.id)
+      redirect('/app/settings/integrations?error=strava_reauth')
+    }
+    throw err
+  }
 }

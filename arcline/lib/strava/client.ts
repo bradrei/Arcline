@@ -105,13 +105,29 @@ export async function getActivity(
   return res.json()
 }
 
+export interface ListActivitiesOptions {
+  perPage?: number
+  after?: number // unix seconds — only return activities after this timestamp
+  page?: number
+}
+
 export async function getAthleteActivities(
   token: StravaToken,
-  perPage = 10,
+  optionsOrPerPage: ListActivitiesOptions | number = 10,
 ): Promise<{ activities: StravaActivity[]; refreshedToken: StravaToken }> {
+  const opts =
+    typeof optionsOrPerPage === 'number' ? { perPage: optionsOrPerPage } : optionsOrPerPage
+  const { perPage = 10, after, page = 1 } = opts
+
   const refreshed = await refreshIfNeeded(token)
+  const params = new URLSearchParams({
+    per_page: String(perPage),
+    page: String(page),
+  })
+  if (after) params.set('after', String(after))
+
   const res = await fetchWithRetry(
-    `${STRAVA_API}/athlete/activities?per_page=${perPage}`,
+    `${STRAVA_API}/athlete/activities?${params}`,
     refreshed.access_token,
   )
   if (!res.ok) throw new Error('Failed to fetch Strava activities')
