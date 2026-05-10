@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { Profile, Plan, PlanWeek, PlanSession, Intensity, SessionType } from '@/types'
+import type { Profile, Plan, PlanWeek, PlanSession, StrengthExercise, Intensity, SessionType } from '@/types'
 import { generateFallbackPlan } from './generateFallbackPlan'
 import { weeksUntilDate } from '@/lib/plan/phase'
 
@@ -26,6 +26,10 @@ interface AIPlanSession {
   target_pace?: string
   target_hr_zone?: number
   completed: boolean
+  // Strength-only
+  focus?: string
+  session_summary?: string
+  exercises?: StrengthExercise[]
 }
 
 interface AIPlanWeek {
@@ -146,6 +150,13 @@ function aiWeekToPlanWeek(w: AIPlanWeek): PlanWeek {
       target_pace: s.target_pace,
       target_hr_zone: s.target_hr_zone,
       completed: s.completed,
+      ...(s.type === 'strength'
+        ? {
+            focus: s.focus,
+            session_summary: s.session_summary,
+            exercises: s.exercises,
+          }
+        : {}),
     })),
   }
 }
@@ -201,6 +212,34 @@ export function verifyPlan(weeks: PlanWeek[], raceDate: string | null): VerifyRe
   }
 
   return { valid: issues.length === 0, issues }
+}
+
+function strengthContext(pref: Profile['strength_preference']): string {
+  switch (pref) {
+    case 'light':
+      return 'Include 1 short strength session per week (30-40 min), focused on injury prevention exercises (single-leg work, core, posterior chain).'
+    case 'moderate':
+      return 'Include 2 strength sessions per week (45-60 min each), balanced with triathlon volume. Lower body strength and upper body pull/push patterns.'
+    case 'serious':
+      return 'Include 2-3 strength sessions per week. At least one should incorporate plyometrics or functional movements. Include a mobility/stretching day if availability allows.'
+    case 'none':
+    default:
+      return 'Do NOT include strength sessions.'
+  }
+}
+
+function strengthSchemaFragment(pref: Profile['strength_preference']): string {
+  if (pref === 'none' || !pref) return ''
+  return `\n\nFor every session with type "strength", populate these additional fields:
+- focus: short string like "Lower body, posterior chain"
+- session_summary: 1-2 sentence description of what this session is achieving
+- exercises: array of 4-7 exercises, each with:
+    name (e.g., "Romanian Deadlift")
+    sets (number, e.g., 3)
+    reps (string, e.g., "8-10" or "AMRAP" or "30s")
+    rest_seconds (number)
+    description (1-2 sentences explaining the movement)
+    cue (1 sentence — primary form cue)`
 }
 
 function buildBlockPrompt(
@@ -269,6 +308,8 @@ ATHLETE PROFILE:
 - Disciplines: ${(profile.disciplines ?? []).join(', ') || 'triathlon'}
 - Injuries/conditions: ${profile.injuries_conditions || 'none'}
 - Weekly availability: ${profile.weekly_hours_available ?? 6} hours across ${profile.weekly_days_available ?? 4} days
+
+STRENGTH: ${strengthContext(profile.strength_preference)}${strengthSchemaFragment(profile.strength_preference)}
 
 PERIODISATION (across the full ${totalWeeks}-week plan):
 ${describePhases(ranges)}

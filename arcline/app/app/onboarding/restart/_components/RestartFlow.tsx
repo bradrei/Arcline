@@ -32,6 +32,8 @@ function profileToData(p: Profile): OnboardingFormData {
     injuries_conditions: p.injuries_conditions ?? '',
     weekly_hours_available: p.weekly_hours_available ?? 6,
     weekly_days_available: p.weekly_days_available ?? 4,
+    strength_preference:
+      (p.strength_preference as OnboardingFormData['strength_preference']) ?? 'none',
     goal_type: (p.goal_type as OnboardingFormData['goal_type']) ?? 'event_date',
     goal_date: p.goal_date ?? '',
     goal_description: p.goal_description ?? '',

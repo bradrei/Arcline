@@ -154,6 +154,43 @@ export function SessionDetailSheet({ open, session, adaptations, onClose }: Prop
               </div>
             )}
 
+            {/* Strength session detail */}
+            {session.type === 'strength' && session.exercises && session.exercises.length > 0 && (
+              <div className="mb-5">
+                {session.session_summary && (
+                  <p className="mb-3 text-sm leading-relaxed text-foreground">
+                    {session.session_summary}
+                  </p>
+                )}
+                {session.focus && (
+                  <p className="mb-3 text-xs uppercase tracking-wider text-foreground-muted">
+                    Focus: {session.focus}
+                  </p>
+                )}
+                <ul className="flex flex-col gap-2">
+                  {session.exercises.map((ex, i) => (
+                    <li key={i} className="rounded-xl border border-white/5 bg-background/40 p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-foreground">{ex.name}</p>
+                        <p className="text-xs text-foreground-muted">
+                          {ex.sets} × {ex.reps}
+                          {ex.rest_seconds ? ` · ${ex.rest_seconds}s rest` : ''}
+                        </p>
+                      </div>
+                      {ex.description && (
+                        <p className="mt-1 text-xs leading-relaxed text-foreground-muted">
+                          {ex.description}
+                        </p>
+                      )}
+                      {ex.cue && (
+                        <p className="mt-1 text-xs italic text-brand-teal">Cue: {ex.cue}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {adaptations.length > 0 && (
               <div className="mb-5 rounded-2xl border border-brand-teal/20 bg-brand-teal/5 p-4">
                 <div className="mb-2 flex items-center gap-2">
@@ -200,13 +237,31 @@ export function SessionDetailSheet({ open, session, adaptations, onClose }: Prop
             )}
 
             <div className="flex flex-col gap-2">
-              {session.type !== 'rest' && (
+              {session.type === 'strength' && session.exercises && session.exercises.length > 0 && session.date && (
+                <Link
+                  href={`/app/log/strength/${session.date}`}
+                  onClick={onClose}
+                  className="block rounded-xl border border-brand-teal bg-brand-teal px-4 py-3 text-center text-sm font-semibold text-background transition hover:bg-brand-teal-dim"
+                >
+                  Start workout
+                </Link>
+              )}
+              {session.type !== 'rest' && session.type !== 'strength' && (
                 <Link
                   href="/app/log"
                   onClick={onClose}
                   className="block rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-3 text-center text-sm font-semibold text-brand-teal transition hover:bg-brand-teal/20"
                 >
                   Log this session
+                </Link>
+              )}
+              {session.type === 'strength' && (
+                <Link
+                  href="/app/log"
+                  onClick={onClose}
+                  className="block rounded-xl border border-white/10 px-4 py-3 text-center text-xs font-medium text-foreground-muted transition hover:border-white/20 hover:text-foreground"
+                >
+                  Log without tracking sets
                 </Link>
               )}
               <Link

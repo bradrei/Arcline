@@ -74,6 +74,34 @@ async function fetchSessionsInRange(
   return (data ?? []) as TrainingSession[]
 }
 
+async function fetchRecentStrengthSets(
+  supabase: SupabaseClient,
+  userId: string,
+  days: number,
+): Promise<Array<{
+  exercise_name: string
+  set_number: number
+  weight_kg: number | null
+  reps_completed: number | null
+  logged_at: string
+}>> {
+  const since = new Date(+new Date() - days * 24 * 60 * 60 * 1000).toISOString()
+  const { data } = await supabase
+    .from('strength_session_sets')
+    .select('exercise_name, set_number, weight_kg, reps_completed, logged_at')
+    .eq('user_id', userId)
+    .gte('logged_at', since)
+    .order('logged_at', { ascending: false })
+    .limit(60)
+  return (data ?? []) as Array<{
+    exercise_name: string
+    set_number: number
+    weight_kg: number | null
+    reps_completed: number | null
+    logged_at: string
+  }>
+}
+
 // ── Load calculation ──────────────────────────────────────────────────────────
 
 export function calculateActualLoad(sessions: TrainingSession[]): number {
@@ -221,13 +249,14 @@ export async function triggerAdaptationAsync(
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
   const now = new Date()
 
-  const [profile, activePlan, recentSessions, currentSession, previousWeekSessions] =
+  const [profile, activePlan, recentSessions, currentSession, previousWeekSessions, strengthSets] =
     await Promise.all([
       fetchProfile(supabase, userId),
       fetchActivePlan(supabase, userId),
       fetchRecentSessions(supabase, userId, 4),
       sessionId ? fetchSession(supabase, sessionId) : Promise.resolve(null),
       fetchSessionsInRange(supabase, userId, sevenDaysAgo, now),
+      fetchRecentStrengthSets(supabase, userId, 14),
     ])
 
   if (!profile || !activePlan) return
@@ -260,12 +289,15 @@ RULES — INVIOLABLE:
 5. Write ai_reasoning in second person. Plain English. As a triathlon coach speaking directly to the athlete. 2–3 sentences maximum. Make it feel human — reference the specific discipline and what you're adjusting and why.
 
 Profile: ${JSON.stringify(profile)}
-Goal: ${JSON.stringify({ type: profile.goal_type, date: profile.goal_date, description: profile.goal_description })}
+Goal: ${JSON.stringify({ type: profile.goal_type, date: profile.goal_date, description: profile.goal_description, race_distance: profile.race_distance, goal_time_seconds: profile.goal_time_seconds, goal_paces: profile.goal_paces })}
 Current plan: ${JSON.stringify(activePlan.weeks)}
 Recent sessions (newest first): ${JSON.stringify(recentSessions)}
+Recent strength sets (last 14 days, newest first): ${JSON.stringify(strengthSets)}
 Trigger: ${JSON.stringify(triggerContext)}
 Today: ${today}
 Previous 7-day actual load (weighted minutes): ${Math.round(baselineLoad)}
+
+Strength calibration: if recent strength sets show the user consistently hitting the prescribed reps at a given load, the next week's strength prescription can progress. If they're consistently failing reps at a given load, reduce next week's prescribed weight slightly. Mention strength load adjustments in ai_reasoning when applicable.
 
 Return JSON in exactly one of these two shapes:
 

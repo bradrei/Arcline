@@ -13,6 +13,7 @@ import { Step5Injuries } from './Step5Injuries'
 import { Step6Availability } from './Step6Availability'
 import { Step7Goal } from './Step7Goal'
 import { Step8Calibration } from './Step8Calibration'
+import { StepStrength } from './StepStrength'
 import { InjuryReferralScreen } from '@/components/InjuryReferralScreen'
 import {
   saveStep,
@@ -37,11 +38,13 @@ export interface OnboardingFormData {
   // Step 6
   weekly_hours_available: number
   weekly_days_available: number
-  // Step 7
+  // Step 7 (NEW): strength preference
+  strength_preference: 'none' | 'light' | 'moderate' | 'serious'
+  // Step 8 (was 7): goal
   goal_type: 'event_date' | 'pace_ability'
   goal_date: string
   goal_description: string
-  // Step 8
+  // Step 9 (was 8): calibration
   calibration_choice: 'import' | 'benchmark' | 'fresh' | ''
 }
 
@@ -57,6 +60,8 @@ function profileToFormData(profile: Profile | null): OnboardingFormData {
     injuries_conditions: profile?.injuries_conditions ?? '',
     weekly_hours_available: profile?.weekly_hours_available ?? 6,
     weekly_days_available: profile?.weekly_days_available ?? 4,
+    strength_preference:
+      (profile?.strength_preference as OnboardingFormData['strength_preference']) ?? 'none',
     goal_type: (profile?.goal_type as OnboardingFormData['goal_type']) ?? 'event_date',
     goal_date: profile?.goal_date ?? '',
     goal_description: profile?.goal_description ?? '',
@@ -64,7 +69,7 @@ function profileToFormData(profile: Profile | null): OnboardingFormData {
   }
 }
 
-const TOTAL_STEPS = 8
+const TOTAL_STEPS = 9
 
 const variants = {
   enter: (dir: number) => ({ x: dir > 0 ? 48 : -48, opacity: 0 }),
@@ -122,12 +127,15 @@ export function OnboardingFlow({ initialProfile }: Props) {
       case 6:
         return null
       case 7:
+        if (!formData.strength_preference) return 'Pick a strength preference.'
+        return null
+      case 8:
         if (!formData.goal_type) return 'Please select a goal type.'
         if (formData.goal_type === 'event_date' && !formData.goal_date)
           return 'Please enter your event date.'
         if (!formData.goal_description.trim()) return 'Please describe your goal or event.'
         return null
-      case 8:
+      case 9:
         if (!formData.calibration_choice) return 'Pick a calibration option to continue.'
         return null
       default:
@@ -158,6 +166,9 @@ export function OnboardingFlow({ initialProfile }: Props) {
         weekly_days_available: formData.weekly_days_available,
       },
       7: {
+        strength_preference: formData.strength_preference,
+      },
+      8: {
         goal_type: formData.goal_type,
         goal_date: formData.goal_date || null,
         goal_description: formData.goal_description,
@@ -245,8 +256,9 @@ export function OnboardingFlow({ initialProfile }: Props) {
     4: <Step4TrainingHistory {...stepProps} onBack={goBack} />,
     5: <Step5Injuries {...stepProps} onBack={goBack} />,
     6: <Step6Availability {...stepProps} onBack={goBack} />,
-    7: <Step7Goal {...stepProps} onBack={goBack} />,
-    8: <Step8Calibration {...stepProps} onBack={goBack} />,
+    7: <StepStrength {...stepProps} onBack={goBack} />,
+    8: <Step7Goal {...stepProps} onBack={goBack} />,
+    9: <Step8Calibration {...stepProps} onBack={goBack} />,
   }
 
   return (
