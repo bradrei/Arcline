@@ -46,11 +46,12 @@ interface PhaseRanges {
   taper: [number, number] | null
 }
 
-function getWeekStart(): string {
+function getMondayOfThisWeek(): string {
   const d = new Date()
-  const day = d.getDay()
-  const daysUntilMonday = day === 0 ? 1 : day === 1 ? 0 : 8 - day
-  d.setDate(d.getDate() + daysUntilMonday)
+  const day = d.getDay() // 0=Sun ... 6=Sat
+  const offsetToMonday = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + offsetToMonday)
+  d.setHours(0, 0, 0, 0)
   return d.toISOString().split('T')[0]
 }
 
@@ -58,6 +59,10 @@ function addDays(iso: string, days: number): string {
   const d = new Date(iso)
   d.setDate(d.getDate() + days)
   return d.toISOString().split('T')[0]
+}
+
+function isoToday(): string {
+  return new Date().toISOString().split('T')[0]
 }
 
 function computeWeekLoad(sessions: AIPlanSession[]): number {
@@ -97,23 +102,21 @@ function describePhases(ranges: PhaseRanges): string {
   return parts.map(p => `- ${p}`).join('\n')
 }
 
-// HC1: cap each week at 115% of the previous week's load (chains across all weeks).
 function enforceHC1(weeks: AIPlanWeek[]): AIPlanWeek[] {
   if (weeks.length === 0) return weeks
   const result: AIPlanWeek[] = [weeks[0]]
-
   for (let i = 1; i < weeks.length; i++) {
     const prevLoad = computeWeekLoad(result[i - 1].sessions)
     const ceiling = prevLoad * 1.15
     const currentLoad = computeWeekLoad(weeks[i].sessions)
-
     if (currentLoad > ceiling) {
       const scaleFactor = ceiling / currentLoad
       const scaledSessions = weeks[i].sessions.map(s => ({
         ...s,
-        duration_min: s.duration_min === 0
-          ? 0
-          : Math.max(15, Math.round((s.duration_min * scaleFactor) / 5) * 5),
+        duration_min:
+          s.duration_min === 0
+            ? 0
+            : Math.max(15, Math.round((s.duration_min * scaleFactor) / 5) * 5),
       }))
       result.push({
         ...weeks[i],
@@ -147,6 +150,59 @@ function aiWeekToPlanWeek(w: AIPlanWeek): PlanWeek {
   }
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
+
+interface VerifyResult {
+  valid: boolean
+  issues: string[]
+}
+
+export function verifyPlan(weeks: PlanWeek[], raceDate: string | null): VerifyResult {
+  const issues: string[] = []
+  if (weeks.length === 0) {
+    issues.push('Plan has zero weeks')
+    return { valid: false, issues }
+  }
+
+  // Every session must have a real ISO date
+  for (const week of weeks) {
+    for (const session of week.sessions) {
+      if (!session.date || !ISO_DATE.test(session.date)) {
+        issues.push(`Week ${week.week_number}: session "${session.day}" has invalid date "${session.date}"`)
+      }
+    }
+  }
+
+  // Final session must land on the race date when there is one
+  if (raceDate) {
+    const lastWeek = weeks[weeks.length - 1]
+    const lastSession = lastWeek.sessions[lastWeek.sessions.length - 1]
+    if (lastSession?.date !== raceDate) {
+      issues.push(
+        `Final session date is ${lastSession?.date ?? 'missing'}, expected race date ${raceDate}`,
+      )
+    }
+  }
+
+  // All session dates across the plan must be non-decreasing
+  const dates = weeks.flatMap(w => w.sessions.map(s => s.date)).filter(Boolean) as string[]
+  for (let i = 1; i < dates.length; i++) {
+    if (dates[i] < dates[i - 1]) {
+      issues.push('Plan dates are not in chronological order')
+      break
+    }
+  }
+
+  // At least one rest day per week
+  for (const week of weeks) {
+    if (!week.sessions.some(s => s.type === 'rest')) {
+      issues.push(`Week ${week.week_number} has no rest day`)
+    }
+  }
+
+  return { valid: issues.length === 0, issues }
+}
+
 function buildBlockPrompt(
   profile: Profile,
   totalWeeks: number,
@@ -155,6 +211,7 @@ function buildBlockPrompt(
   weekStart: string,
   previousLoad: number | null,
   ranges: PhaseRanges,
+  raceDate: string | null,
 ): string {
   const blockEnd = blockStart + blockSize - 1
   const isFinalBlock = blockEnd === totalWeeks
@@ -188,11 +245,23 @@ function buildBlockPrompt(
     ? `Continuity: the previous block ended with weekly load of ${Math.round(previousLoad)} weighted minutes. Build naturally from there — never spike above 115% of the previous week.`
     : 'This is the first block of the plan.'
 
-  const finalWeekRule = isFinalBlock && isEventGoal
-    ? `\n- The final week (week ${totalWeeks}) MUST include race day itself as a session of type "race". Race day intensity is "race_pace". Schedule the rest of the taper week appropriately around it.`
+  const finalRule = isFinalBlock && isEventGoal && raceDate
+    ? `\n\nFINAL BLOCK / RACE WEEK:\n- The final week (week ${totalWeeks}) is race week and MUST end on race day ${raceDate}.\n- The very last session in week ${totalWeeks} MUST be type "race", intensity "race_pace", dated EXACTLY ${raceDate}.\n- Schedule the rest of the taper week appropriately around it (short, sharp, low volume).`
     : ''
 
-  return `Athlete profile:
+  const todayISO = isoToday()
+  const raceLine = isEventGoal && raceDate
+    ? `RACE DATE: ${raceDate}\nRACE NAME: ${profile.goal_description ?? 'their target race'}\nThe full plan covers every week from today (${todayISO}) until race day. Total length: ${totalWeeks} weeks.`
+    : `GOAL: ${profile.goal_description ?? 'pace/ability target'} (no fixed event date). Plan length: ${totalWeeks} weeks.`
+
+  return `You are Arcline, an expert triathlon and Ironman coach.
+
+TODAY'S DATE: ${todayISO}
+${raceLine}
+
+This API call generates weeks ${blockStart}–${blockEnd} of the plan (${blockSize} week${blockSize === 1 ? '' : 's'}).
+
+ATHLETE PROFILE:
 - Age: ${profile.age ?? 'unknown'}, Sex: ${profile.sex ?? 'unknown'}
 - Height: ${profile.height_cm ?? '?'}cm, Weight: ${profile.weight_kg ?? '?'}kg
 - Resting HR: ${profile.resting_hr ?? 'not provided'} bpm
@@ -200,32 +269,28 @@ function buildBlockPrompt(
 - Disciplines: ${(profile.disciplines ?? []).join(', ') || 'triathlon'}
 - Injuries/conditions: ${profile.injuries_conditions || 'none'}
 - Weekly availability: ${profile.weekly_hours_available ?? 6} hours across ${profile.weekly_days_available ?? 4} days
-- Goal type: ${profile.goal_type ?? 'unspecified'}
-- Goal date: ${profile.goal_date ?? 'open-ended'}
-- Goal description: ${profile.goal_description ?? 'not specified'}
 
-Plan structure:
-- Total plan length: ${totalWeeks} week${totalWeeks === 1 ? '' : 's'}
-- This call generates weeks ${blockStart} through ${blockEnd} (${blockSize} week${blockSize === 1 ? '' : 's'})
-- Periodisation across the whole plan:
+PERIODISATION (across the full ${totalWeeks}-week plan):
 ${describePhases(ranges)}
 
 ${continuity}
 
-Rules:
-- Each week has exactly 1 rest day (type "rest", duration_min 0, intensity "easy", completed false)
-- Distribute remaining sessions across the athlete's available ${profile.weekly_days_available ?? 4} training days
-- Match total weekly active duration to ~${Math.round((profile.weekly_hours_available ?? 6) * 60)} minutes during peak weeks; reduce in base/taper
-- Include brick sessions when the athlete trains 5+ days and trains both bike and run
-- intensity_multiplier values are fixed: easy=1.0, moderate=1.3, hard=1.6, race_pace=1.8
-- total_load_minutes = sum of (duration_min × intensity_multiplier) across all sessions in the week
-- Apply the appropriate phase from the periodisation above for each week in this block
-- Week 1 of the block starts ${weekStart}; subsequent weeks follow weekly. All session dates must be real calendar dates.
-- week_number values in this block must be exactly ${blockStart} through ${blockEnd}, in that order${finalWeekRule}
-- Output ONLY raw JSON matching the schema. No markdown, no code fences, no text before or after.
+ABSOLUTE REQUIREMENTS — your output is REJECTED if any of these are violated:
+1. Output ONLY raw JSON matching the schema. No markdown fences, no commentary, no text before/after.
+2. week_number values in this block MUST be exactly ${blockStart} through ${blockEnd}, in order.
+3. Week 1 of this block starts ${weekStart}. Each subsequent week_start is exactly 7 days later.
+4. EVERY session MUST have a real ISO date (YYYY-MM-DD) computed from week_start + day-of-week offset. NEVER omit the date. NEVER use a day name in place of a date.
+5. Every week MUST contain exactly one rest day (type "rest", duration_min 0, intensity "easy", completed false).
+6. intensity_multiplier values are FIXED: easy=1.0, moderate=1.3, hard=1.6, race_pace=1.8.
+7. total_load_minutes MUST equal the sum of (duration_min × intensity_multiplier) across all sessions in the week.
+8. Distribute non-rest sessions across the athlete's available ${profile.weekly_days_available ?? 4} training days. Never schedule more than that.
+9. Total weekly active duration approximates ~${Math.round((profile.weekly_hours_available ?? 6) * 60)} minutes during peak weeks; reduce in base/taper.
+10. Include brick sessions when the athlete trains 5+ days and trains both bike and run.${finalRule}
 
-Schema:
-${schema}`
+SCHEMA:
+${schema}
+
+Generate weeks ${blockStart}–${blockEnd} now. JSON only.`
 }
 
 async function callBlock(
@@ -267,6 +332,47 @@ async function callBlock(
   throw new Error('unreachable')
 }
 
+async function generateFullPlanWeeks(
+  client: Anthropic,
+  systemPrompt: string,
+  profile: Profile,
+  totalWeeks: number,
+  planStart: string,
+  raceDate: string | null,
+): Promise<AIPlanWeek[]> {
+  const ranges = computePhaseRanges(totalWeeks)
+  const allWeeks: AIPlanWeek[] = []
+  let blockStart = 1
+  let dateCursor = planStart
+
+  while (blockStart <= totalWeeks) {
+    const remaining = totalWeeks - blockStart + 1
+    const blockSize = Math.min(BLOCK_SIZE, remaining)
+    const blockEnd = blockStart + blockSize - 1
+    const previousLoad =
+      allWeeks.length > 0 ? computeWeekLoad(allWeeks[allWeeks.length - 1].sessions) : null
+
+    const userPrompt = buildBlockPrompt(
+      profile,
+      totalWeeks,
+      blockStart,
+      blockSize,
+      dateCursor,
+      previousLoad,
+      ranges,
+      raceDate,
+    )
+
+    const blockWeeks = await callBlock(client, systemPrompt, userPrompt, blockStart, blockEnd)
+    allWeeks.push(...blockWeeks)
+
+    blockStart += blockSize
+    dateCursor = addDays(dateCursor, blockSize * 7)
+  }
+
+  return allWeeks
+}
+
 export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey || apiKey.startsWith('your-')) {
@@ -274,59 +380,59 @@ export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> 
   }
 
   const totalWeeks = computeTotalWeeks(profile)
-  const planStart = getWeekStart()
-  const ranges = computePhaseRanges(totalWeeks)
+  const planStart = getMondayOfThisWeek()
+  const raceDate =
+    profile.goal_type === 'event_date' && profile.goal_date ? profile.goal_date : null
 
   const client = new Anthropic({ apiKey })
   const systemPrompt =
-    'You are an expert triathlon coach building personalised, periodised training plans for hybrid athletes (swim/bike/run). Output ONLY raw JSON — no markdown, no explanation, no code fences, no text before or after the JSON object.'
+    'You are an expert triathlon coach building personalised, periodised, date-anchored training plans for hybrid athletes (swim/bike/run). Your output is JSON only — no markdown, no explanation, no code fences. Every session you generate must include a real ISO date.'
 
-  try {
-    const allWeeks: AIPlanWeek[] = []
-    let blockStart = 1
-    let dateCursor = planStart
-
-    while (blockStart <= totalWeeks) {
-      const remaining = totalWeeks - blockStart + 1
-      const blockSize = Math.min(BLOCK_SIZE, remaining)
-      const blockEnd = blockStart + blockSize - 1
-      const previousLoad =
-        allWeeks.length > 0 ? computeWeekLoad(allWeeks[allWeeks.length - 1].sessions) : null
-
-      const userPrompt = buildBlockPrompt(
+  // Two attempts: if the first plan fails verification, retry once before falling back.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const aiWeeks = await generateFullPlanWeeks(
+        client,
+        systemPrompt,
         profile,
         totalWeeks,
-        blockStart,
-        blockSize,
-        dateCursor,
-        previousLoad,
-        ranges,
+        planStart,
+        raceDate,
       )
+      const enforced = enforceHC1(aiWeeks)
+      const planWeeks = enforced.map(aiWeekToPlanWeek)
 
-      const blockWeeks = await callBlock(client, systemPrompt, userPrompt, blockStart, blockEnd)
-      allWeeks.push(...blockWeeks)
+      const verification = verifyPlan(planWeeks, raceDate)
+      if (!verification.valid) {
+        console.warn(
+          `Plan verification failed (attempt ${attempt + 1}/2):`,
+          verification.issues.join('; '),
+        )
+        if (attempt === 0) continue
+        throw new Error(`Plan verification failed: ${verification.issues.join('; ')}`)
+      }
 
-      blockStart += blockSize
-      dateCursor = addDays(dateCursor, blockSize * 7)
+      return {
+        user_id: profile.id,
+        generated_at: new Date().toISOString(),
+        version: 1,
+        goal_anchor: {
+          goal_type: profile.goal_type,
+          goal_date: profile.goal_date,
+          goal_description: profile.goal_description,
+        },
+        weeks: planWeeks,
+        status: 'active',
+        adaptation_count: 0,
+        is_fallback: false,
+      }
+    } catch (err) {
+      if (attempt === 1) {
+        console.error('Plan generation failed after retry:', err)
+        return generateFallbackPlan(profile, profile.id)
+      }
     }
-
-    const enforced = enforceHC1(allWeeks)
-
-    return {
-      user_id: profile.id,
-      generated_at: new Date().toISOString(),
-      version: 1,
-      goal_anchor: {
-        goal_type: profile.goal_type,
-        goal_date: profile.goal_date,
-        goal_description: profile.goal_description,
-      },
-      weeks: enforced.map(aiWeekToPlanWeek),
-      status: 'active',
-      adaptation_count: 0,
-      is_fallback: false,
-    }
-  } catch {
-    return generateFallbackPlan(profile, profile.id)
   }
+
+  return generateFallbackPlan(profile, profile.id)
 }

@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import EmailCapture from '@/app/_components/EmailCapture'
 
 export default function LandingPage() {
   return (
@@ -39,15 +38,14 @@ export default function LandingPage() {
             accordingly, every single time.
           </p>
 
-          {/* CTAs */}
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+          {/* CTA — single primary action, no duplicate */}
+          <div className="flex justify-center">
             <Link
               href="/signup"
-              className="rounded-xl bg-brand-teal px-8 py-3.5 text-sm font-semibold text-background transition-colors hover:bg-brand-teal-dim"
+              className="rounded-xl bg-brand-teal px-10 py-4 text-base font-semibold text-background transition-colors hover:bg-brand-teal-dim"
             >
               Get early access
             </Link>
-            <EmailCapture />
           </div>
 
           {/* Micro-copy */}

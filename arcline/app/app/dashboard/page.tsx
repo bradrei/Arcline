@@ -91,12 +91,15 @@ export default async function DashboardPage() {
   const now = new Date()
   const eightWeeksAgo = new Date(+now - 56 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
 
+  // Prefer the newest non-fallback plan over any older fallback. If only a
+  // fallback exists, that's what we render (with the "still tailoring" banner).
   const [planResult, sessionsResult, recentAdaptations] = await Promise.all([
     supabase
       .from('plans')
       .select('*')
       .eq('user_id', user.id)
       .eq('status', 'active')
+      .order('is_fallback', { ascending: true })
       .order('generated_at', { ascending: false })
       .limit(1)
       .maybeSingle(),
@@ -146,9 +149,17 @@ export default async function DashboardPage() {
 
       {/* Fallback banner */}
       {typedPlan?.is_fallback && (
-        <div className="mb-6 rounded-xl border border-brand-teal/20 bg-brand-teal/5 px-4 py-3">
-          <p className="text-sm text-brand-teal">
-            We&apos;re still tailoring your plan — check back in a few minutes.
+        <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-300">
+            This plan is a starter template, not your AI plan.
+          </p>
+          <p className="mt-1 text-xs text-amber-200/80">
+            Either AI generation hasn&apos;t completed yet, or it failed. The cron retries daily —
+            or you can{' '}
+            <a href="/app/settings" className="underline hover:text-amber-100">
+              regenerate now from settings
+            </a>
+            .
           </p>
         </div>
       )}
