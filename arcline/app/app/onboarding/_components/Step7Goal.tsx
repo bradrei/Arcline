@@ -86,7 +86,7 @@ export function Step7Goal({ data, onChange, onNext, onBack, isLoading, error }: 
       <StepNav
         onBack={onBack}
         onNext={onNext}
-        nextLabel={isLoading ? 'Building your plan…' : 'Build my plan'}
+        nextLabel="Next"
         isLoading={isLoading}
       />
     </div>

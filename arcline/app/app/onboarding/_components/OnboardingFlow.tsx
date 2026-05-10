@@ -12,6 +12,7 @@ import { Step4TrainingHistory } from './Step4TrainingHistory'
 import { Step5Injuries } from './Step5Injuries'
 import { Step6Availability } from './Step6Availability'
 import { Step7Goal } from './Step7Goal'
+import { Step8Calibration } from './Step8Calibration'
 import { InjuryReferralScreen } from '@/components/InjuryReferralScreen'
 import {
   saveStep,
@@ -40,6 +41,8 @@ export interface OnboardingFormData {
   goal_type: 'event_date' | 'pace_ability'
   goal_date: string
   goal_description: string
+  // Step 8
+  calibration_choice: 'import' | 'benchmark' | 'fresh' | ''
 }
 
 function profileToFormData(profile: Profile | null): OnboardingFormData {
@@ -57,10 +60,11 @@ function profileToFormData(profile: Profile | null): OnboardingFormData {
     goal_type: (profile?.goal_type as OnboardingFormData['goal_type']) ?? 'event_date',
     goal_date: profile?.goal_date ?? '',
     goal_description: profile?.goal_description ?? '',
+    calibration_choice: (profile?.calibration_choice as OnboardingFormData['calibration_choice']) ?? '',
   }
 }
 
-const TOTAL_STEPS = 7
+const TOTAL_STEPS = 8
 
 const variants = {
   enter: (dir: number) => ({ x: dir > 0 ? 48 : -48, opacity: 0 }),
@@ -123,6 +127,9 @@ export function OnboardingFlow({ initialProfile }: Props) {
           return 'Please enter your event date.'
         if (!formData.goal_description.trim()) return 'Please describe your goal or event.'
         return null
+      case 8:
+        if (!formData.calibration_choice) return 'Pick a calibration option to continue.'
+        return null
       default:
         return null
     }
@@ -149,6 +156,11 @@ export function OnboardingFlow({ initialProfile }: Props) {
       6: {
         weekly_hours_available: formData.weekly_hours_available,
         weekly_days_available: formData.weekly_days_available,
+      },
+      7: {
+        goal_type: formData.goal_type,
+        goal_date: formData.goal_date || null,
+        goal_description: formData.goal_description,
       },
     }
 
@@ -189,12 +201,13 @@ export function OnboardingFlow({ initialProfile }: Props) {
       return
     }
 
-    // Step 7: complete onboarding + generate plan
+    // Step 8: complete onboarding — branches on calibration_choice (server-side)
     if (step === TOTAL_STEPS) {
       const result = await completeOnboarding({
         goal_type: formData.goal_type,
         goal_date: formData.goal_date || null,
         goal_description: formData.goal_description,
+        calibration_choice: formData.calibration_choice || 'fresh',
       })
       // completeOnboarding redirects on success; only reaches here on error
       if (result?.error) setError(result.error)
@@ -233,6 +246,7 @@ export function OnboardingFlow({ initialProfile }: Props) {
     5: <Step5Injuries {...stepProps} onBack={goBack} />,
     6: <Step6Availability {...stepProps} onBack={goBack} />,
     7: <Step7Goal {...stepProps} onBack={goBack} />,
+    8: <Step8Calibration {...stepProps} onBack={goBack} />,
   }
 
   return (

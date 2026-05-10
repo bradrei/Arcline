@@ -160,6 +160,36 @@ CREATE TABLE IF NOT EXISTS founder_bug_log (
   created_at timestamptz DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS benchmarks (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  status text DEFAULT 'pending', -- 'pending' | 'in_progress' | 'completed' | 'skipped'
+  protocol jsonb NOT NULL,
+  results jsonb,
+  created_at timestamptz DEFAULT now(),
+  completed_at timestamptz
+);
+
+-- profile additions for Sessions 16-18
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS last_plan_restart_at timestamptz;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS calibration_choice text; -- 'import' | 'benchmark' | 'fresh' | null
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS strength_preference text DEFAULT 'none'; -- 'none' | 'light' | 'moderate' | 'serious'
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS race_distance text; -- 'sprint' | 'olympic' | '70.3' | 'ironman' | 'standalone_run' | 'other'
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS goal_time_seconds int;
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS goal_paces jsonb; -- { swim_per_100m?, bike_kmh?, run_per_km? }
+
+CREATE TABLE IF NOT EXISTS strength_session_sets (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  session_id uuid REFERENCES sessions(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES profiles(id) ON DELETE CASCADE,
+  exercise_name text NOT NULL,
+  exercise_index int NOT NULL,
+  set_number int NOT NULL,
+  weight_kg numeric,
+  reps_completed int,
+  logged_at timestamptz DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS coach_messages_user_created_idx
   ON coach_messages (user_id, created_at DESC);
 
@@ -178,6 +208,8 @@ ALTER TABLE plan_generation_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plan_generation_failures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE coach_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE founder_bug_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE benchmarks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE strength_session_sets ENABLE ROW LEVEL SECURITY;
 -- waitlist: no RLS (server-side only via service role key)
 -- founder_bug_log: RLS enabled with no public policy — writes go through service role
 --                  in lib/founder/actions.ts after the FOUNDER_EMAIL gate.
@@ -212,6 +244,12 @@ CREATE POLICY "own plan generation failures" ON plan_generation_failures FOR SEL
 
 DROP POLICY IF EXISTS "own coach messages" ON coach_messages;
 CREATE POLICY "own coach messages" ON coach_messages FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own benchmarks" ON benchmarks;
+CREATE POLICY "own benchmarks" ON benchmarks FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "own strength sets" ON strength_session_sets;
+CREATE POLICY "own strength sets" ON strength_session_sets FOR ALL USING (auth.uid() = user_id);
 
 -- ─────────────────────────────────────────────
 -- Storage — session screenshots bucket

@@ -59,8 +59,66 @@ export interface Profile {
   strava_connected: boolean
   strava_token: Record<string, unknown> | null
   strava_needs_reauth?: boolean
+  last_plan_restart_at?: string | null
+  calibration_choice?: 'import' | 'benchmark' | 'fresh' | null
+  strength_preference?: 'none' | 'light' | 'moderate' | 'serious' | null
+  race_distance?: 'sprint' | 'olympic' | '70.3' | 'ironman' | 'standalone_run' | 'other' | null
+  goal_time_seconds?: number | null
+  goal_paces?: { swim_per_100m?: string; bike_kmh?: number; run_per_km?: string } | null
   created_at: string
   updated_at: string
+}
+
+export interface BenchmarkProtocolSession {
+  day_number: number
+  date: string
+  type: 'run' | 'bike' | 'swim'
+  title: string
+  protocol: string
+  target_metric: 'avg_pace' | 'avg_power'
+}
+
+export interface BenchmarkProtocol {
+  sessions: BenchmarkProtocolSession[]
+}
+
+export interface BenchmarkResults {
+  run_pace?: string | null
+  bike_power?: number | null
+  bike_kmh?: number | null
+  swim_pace?: string | null
+  notes?: string | null
+}
+
+export interface Benchmark {
+  id: string
+  user_id: string
+  status: 'pending' | 'in_progress' | 'completed' | 'skipped'
+  protocol: BenchmarkProtocol
+  results: BenchmarkResults | null
+  created_at: string
+  completed_at: string | null
+}
+
+export interface StrengthExercise {
+  name: string
+  sets: number
+  reps: string
+  rest_seconds: number
+  description: string
+  cue: string
+}
+
+export interface StrengthSessionSet {
+  id: string
+  session_id: string
+  user_id: string
+  exercise_name: string
+  exercise_index: number
+  set_number: number
+  weight_kg: number | null
+  reps_completed: number | null
+  logged_at: string
 }
 
 export type SessionType = 'swim' | 'bike' | 'run' | 'brick' | 'strength' | 'rest' | 'open_water' | 'race' | 'other'
@@ -77,6 +135,10 @@ export interface PlanSession {
   target_pace?: string
   target_hr_zone?: number
   completed?: boolean
+  // Strength sessions only
+  focus?: string
+  exercises?: StrengthExercise[]
+  session_summary?: string
 }
 
 export interface PlanWeek {

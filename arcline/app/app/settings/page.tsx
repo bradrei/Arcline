@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { regenerateActivePlan } from '@/lib/onboarding/actions'
+import { regenerateActivePlan, restartPlan } from '@/lib/onboarding/actions'
 import type { Plan, Profile } from '@/types'
 
 export const metadata = { title: 'Settings — Arcline' }
@@ -11,6 +11,7 @@ export const maxDuration = 60
 type SearchParams = Promise<{
   plan?: string
   error?: string
+  days?: string
 }>
 
 export default async function SettingsPage({
@@ -24,7 +25,11 @@ export default async function SettingsPage({
   if (!user) redirect('/login')
 
   const [profileResult, planResult, sessionsCountResult] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).single(),
+    supabase
+      .from('profiles')
+      .select('*, last_plan_restart_at')
+      .eq('id', user.id)
+      .single(),
     supabase
       .from('plans')
       .select('id, version, is_fallback, weeks, generated_at')
@@ -66,6 +71,13 @@ export default async function SettingsPage({
           <p className="text-sm text-red-300">Profile not found.</p>
         </div>
       )}
+      {params.error === 'restart_rate_limited' && (
+        <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
+          <p className="text-sm text-amber-300">
+            You can start a new plan again in {params.days ?? 'about 30'} days.
+          </p>
+        </div>
+      )}
 
       {/* Plan card */}
       <section className="mb-6 rounded-2xl border border-white/10 bg-surface p-6">
@@ -105,7 +117,7 @@ export default async function SettingsPage({
       {/* Integrations link */}
       <Link
         href="/app/settings/integrations"
-        className="block rounded-2xl border border-white/10 bg-surface p-6 transition hover:border-white/20"
+        className="mb-6 block rounded-2xl border border-white/10 bg-surface p-6 transition hover:border-white/20"
       >
         <div className="flex items-center justify-between">
           <div>
@@ -117,6 +129,31 @@ export default async function SettingsPage({
           <span className="text-foreground-muted">→</span>
         </div>
       </Link>
+
+      {/* Restart plan card */}
+      <section className="rounded-2xl border border-amber-400/20 bg-amber-400/5 p-6">
+        <h2 className="font-semibold text-foreground">Start a new training plan</h2>
+        <p className="mt-1 text-sm text-foreground-muted">
+          Use this if your goals have changed or you want to start fresh. This archives your
+          current plan and runs you back through goal selection and calibration.
+        </p>
+        <p className="mt-2 text-xs text-amber-200/80">
+          {profile?.last_plan_restart_at
+            ? `Last restart: ${new Date(profile.last_plan_restart_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}.`
+            : "You haven't restarted yet."}{' '}
+          Available once every 30 days.
+        </p>
+        <div className="mt-4">
+          <form action={restartPlan}>
+            <button
+              type="submit"
+              className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-5 py-2.5 text-sm font-semibold text-amber-300 transition hover:bg-amber-400/20"
+            >
+              Start new plan
+            </button>
+          </form>
+        </div>
+      </section>
     </main>
   )
 }

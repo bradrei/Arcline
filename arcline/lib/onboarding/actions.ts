@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { detectInjury, type InjurySource } from '@/lib/ai/detectInjury'
 import { generatePlan } from '@/lib/ai/generatePlan'
+import { buildBenchmarkProtocol, todayISO } from '@/lib/benchmark/protocol'
 import type { Profile, PlanWeek } from '@/types'
 
 type ProfileUpdate = Partial<Omit<Profile, 'id' | 'created_at' | 'updated_at'>>
@@ -165,7 +166,24 @@ export async function completeOnboarding(
 
   if (fetchError || !profile) return { error: 'Could not load profile for plan generation.' }
 
-  // Generate plan (AI → fallback on failure)
+  const calibration =
+    (profile as Profile).calibration_choice ?? finalData.calibration_choice ?? 'fresh'
+
+  // Branch on calibration choice
+  if (calibration === 'benchmark') {
+    // Create a benchmark row, do not generate the plan yet — the user goes through
+    // the 5-day benchmark flow first.
+    const protocol = buildBenchmarkProtocol(todayISO())
+    await supabase.from('benchmarks').insert({
+      user_id: user.id,
+      status: 'pending',
+      protocol,
+    })
+    redirect('/app/onboarding/benchmark')
+  }
+
+  // 'import' and 'fresh' both generate a plan immediately. 'import' users are
+  // nudged to /app/settings/integrations afterwards via a query param banner.
   const planData = await generatePlan(profile as Profile)
 
   const { data: insertedPlan, error: planError } = await supabase
@@ -176,16 +194,17 @@ export async function completeOnboarding(
 
   if (planError) return { error: planError.message }
 
-  // If AI generation failed and we used the fallback, queue for background regen
   if (planData.is_fallback && insertedPlan) {
     await supabase.from('plan_generation_queue').insert({
       user_id: user.id,
       plan_id: insertedPlan.id,
       status: 'pending',
     })
-    // Silently ignore if table doesn't exist yet
   }
 
+  if (calibration === 'import') {
+    redirect('/app/dashboard?calibrate=import')
+  }
   redirect('/app/dashboard')
 }
 
@@ -227,4 +246,92 @@ export async function regenerateActivePlan(): Promise<void> {
   }
 
   redirect(newPlan.is_fallback ? '/app/dashboard?plan=fallback' : '/app/dashboard?plan=regenerated')
+}
+
+// ── Restart plan: 30-day rate-limited, routes back through goal + calibration ─
+
+export async function restartPlan(): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('last_plan_restart_at')
+    .eq('id', user.id)
+    .single()
+
+  if (profile?.last_plan_restart_at) {
+    const last = new Date(profile.last_plan_restart_at).getTime()
+    const daysSince = (+new Date() - last) / (24 * 60 * 60 * 1000)
+    if (daysSince < 30) {
+      redirect(`/app/settings?error=restart_rate_limited&days=${Math.ceil(30 - daysSince)}`)
+    }
+  }
+
+  // Stamp the restart timestamp now so even if the user abandons mid-flow they
+  // can't re-trigger before 30 days. Plan archival happens after they finish
+  // the goal + calibration flow at /app/onboarding/restart.
+  await supabase
+    .from('profiles')
+    .update({ last_plan_restart_at: new Date().toISOString() })
+    .eq('id', user.id)
+
+  redirect('/app/onboarding/restart')
+}
+
+export async function completeRestart(
+  data: ProfileUpdate & { calibration_choice: 'import' | 'benchmark' | 'fresh' },
+): Promise<{ error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: 'Not authenticated.' }
+
+  // Update goal + calibration on profile
+  const { error: profileErr } = await supabase
+    .from('profiles')
+    .update({
+      goal_type: data.goal_type,
+      goal_date: data.goal_date,
+      goal_description: data.goal_description,
+      calibration_choice: data.calibration_choice,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', user.id)
+  if (profileErr) return { error: profileErr.message }
+
+  // Archive existing active plan(s)
+  await supabase
+    .from('plans')
+    .update({ status: 'archived' })
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+
+  if (data.calibration_choice === 'benchmark') {
+    const protocol = buildBenchmarkProtocol(todayISO())
+    await supabase.from('benchmarks').insert({
+      user_id: user.id,
+      status: 'pending',
+      protocol,
+    })
+    redirect('/app/onboarding/benchmark')
+  }
+
+  // 'import' or 'fresh' — generate a fresh plan now
+  const { data: profileData } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single()
+  if (!profileData) return { error: 'Could not load profile.' }
+
+  const newPlan = await generatePlan(profileData as Profile)
+  const { error: planError } = await supabase.from('plans').insert(newPlan)
+  if (planError) return { error: planError.message }
+
+  redirect(
+    data.calibration_choice === 'import'
+      ? '/app/dashboard?calibrate=import'
+      : '/app/dashboard?plan=regenerated',
+  )
 }
