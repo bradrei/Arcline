@@ -69,6 +69,13 @@ function isoToday(): string {
   return new Date().toISOString().split('T')[0]
 }
 
+function formatSeconds(total: number): string {
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
 function computeWeekLoad(sessions: AIPlanSession[]): number {
   return sessions.reduce((sum, s) => {
     const mult = INTENSITY_MULTIPLIERS[s.intensity] ?? 1.0
@@ -289,9 +296,20 @@ function buildBlockPrompt(
     : ''
 
   const todayISO = isoToday()
-  const raceLine = isEventGoal && raceDate
-    ? `RACE DATE: ${raceDate}\nRACE NAME: ${profile.goal_description ?? 'their target race'}\nThe full plan covers every week from today (${todayISO}) until race day. Total length: ${totalWeeks} weeks.`
-    : `GOAL: ${profile.goal_description ?? 'pace/ability target'} (no fixed event date). Plan length: ${totalWeeks} weeks.`
+
+  let raceLine: string
+  if (isEventGoal && raceDate) {
+    const distance = profile.race_distance ?? 'event'
+    const finishMode = profile.goal_time_seconds
+      ? `targeting a total finish time of ${formatSeconds(profile.goal_time_seconds)} for their ${distance}.`
+      : `goal: finish their ${distance}, no specific time target.`
+    const pacesLine = profile.goal_paces
+      ? `Target paces: swim ${profile.goal_paces.swim_per_100m ?? 'unspecified'} per 100m, bike ${profile.goal_paces.bike_kmh ?? 'unspecified'} km/h, run ${profile.goal_paces.run_per_km ?? 'unspecified'} per km. Calibrate threshold and race-pace zones to these.`
+      : ''
+    raceLine = `RACE DATE: ${raceDate}\nRACE NAME: ${profile.goal_description ?? 'their target race'}\nRACE DISTANCE: ${distance}\nThe athlete is ${finishMode}\n${pacesLine}\nThe full plan covers every week from today (${todayISO}) until race day. Total length: ${totalWeeks} weeks.`
+  } else {
+    raceLine = `GOAL: ${profile.goal_description ?? 'pace/ability target'} (no fixed event date). Plan length: ${totalWeeks} weeks.`
+  }
 
   return `You are Arcline, an expert triathlon and Ironman coach.
 

@@ -5,8 +5,8 @@
 
 ## Current state
 
-**Last completed session:** Session 14 — May 2026  
-**Next session:** Dogfood — founder uses the app for 2 consecutive weeks against the DOGFOOD.md protocol. No new build session until after that signal.
+**Last completed session:** Session 18 — May 2026  
+**Next session:** Dogfood — founder runs through the new flows (date-anchored plans, benchmark calibration, strength tracker, race-goal capture, plan view modes). Re-evaluate after a full training week.
 
 ---
 
@@ -182,6 +182,72 @@ Enforced before any plan is written to the DB. Every week in the plan. Load = `d
 
 ### Session 0 — Pre-flight
 Accounts, API keys, project setup. (Completed before this repo.)
+
+### Sessions 15–18 — May 2026 (consolidated v5 batch)
+
+**Session 15 — refinement audit + date-anchored plans:**
+- Landing page: removed duplicate CTA. Single primary "Get early access" link. EmailCapture removed.
+- Dashboard plan query: orders by `(is_fallback ASC, generated_at DESC)` so a real AI plan beats an older fallback even if archive races left both active. Banner reworded to amber + honest about state, links to settings for manual regeneration.
+- `lib/ai/generatePlan.ts` rewritten:
+  - Race date is a hard constraint passed into every block prompt. Final block + event_date goal forces the last session to be `type: "race"`, `intensity: "race_pace"`, dated EXACTLY on the race date.
+  - Every session must carry a real ISO date. The prompt's "ABSOLUTE REQUIREMENTS" list makes this an invariant.
+  - New `verifyPlan()` checks: every session has an ISO date, dates are chronological, every week has a rest day, final session lands on the race date. On verification failure, the generator retries once before falling back.
+- `/api/admin/migrate-plans` (founder-gated, ?dry=1 supported): audits all active plans, regenerates any without ISO dates or with a final session not on the user's race date. Service-role client.
+
+**Session 16 — benchmark testing + plan restart:**
+- Schema: `benchmarks` (RLS), `strength_session_sets` (RLS), profile columns: `last_plan_restart_at`, `calibration_choice`, `strength_preference`, `race_distance`, `goal_time_seconds`, `goal_paces`. Idempotent ALTERs.
+- Onboarding extended to 8 steps. New `Step8Calibration` presents three cards: Strava import / 5-day benchmark / fresh. Persists to `profiles.calibration_choice`.
+- `completeOnboarding` branches on calibration: `'benchmark'` creates a benchmark row + redirects to `/app/onboarding/benchmark`; `'import'`/`'fresh'` generate plan immediately. Calibration `'import'` redirects to dashboard with `?calibrate=import` for a future banner.
+- `lib/benchmark/protocol.ts` + `lib/benchmark/actions.ts`. Protocol = run TT (Day 1), bike TT (Day 3), swim TT (Day 5). Per-session inline log forms. `finalizeBenchmark` merges results into `profile.goal_paces` so the AI sees the calibration data, then archives any active plan and generates a new one. `skipBenchmark` generates without calibration.
+- Plan restart: `restartPlan` rate-limited to once per 30 days via `last_plan_restart_at`. `/app/onboarding/restart` reuses `Step7Goal` + `Step8Calibration`. `completeRestart` archives existing plans + runs the same calibration branch as `completeOnboarding`.
+- Settings page surfaces restart card with last-restart date + amber rate-limit error banner.
+
+**Session 17 — strength training expansion:**
+- New `StepStrength` (slot 7) captures `strength_preference`: none/light/moderate/serious. Goal + calibration shifted to slots 8 + 9. `TOTAL_STEPS = 9`.
+- Plan generation prompt extended: a `strength_context` block + a strength-specific schema fragment instructs the AI to populate `focus`, `session_summary`, and a 4–7 exercise array (name, sets, reps, rest, description, cue) for every strength session. `AIPlanSession` + `aiWeekToPlanWeek` carry these fields end-to-end.
+- `SessionDetailSheet` renders strength sessions in full: summary, focus, exercise list with cues. Two CTAs: "Start workout" routes to the live tracker; "Log without tracking sets" remains as a fallback path.
+- `/app/log/strength/[date]` route + `LiveWorkoutTracker` client: per-set weight + reps inputs, automatic rest timer with skip, exercise progress bar, finish flow.
+- `lib/strength/actions.ts` `finishStrengthSession`: HC2 on notes (writes injury_flag + pauses plan + returns `injured: true` so the LiveWorkoutTracker can surface the global referral screen via Zustand). Inserts session row, persists every logged set to `strength_session_sets`. Fires `triggerAdaptationAsync` in the background.
+- `triggerAdaptation` now fetches the last 14 days of strength sets (max 60) and includes them in the adaptation prompt with explicit progressive-overload guidance.
+
+**Session 18 — race goals + timeline refinement:**
+- `Step7Goal` extended for event-date goals: race distance dropdown, "Just finish" vs "Target time" toggle, hh:mm:ss inputs, per-discipline pace fields (swim per 100m, bike km/h, run per km).
+- `OnboardingFormData` carries `race_distance`, `goal_mode`, `goal_time_*`, and the three pace fields. `RestartFlow` mirrors. `saveStep` payload for step 8 builds the canonical `goal_time_seconds` + `goal_paces` jsonb shape.
+- `completeRestart` updates `race_distance`, `goal_time_seconds`, `goal_paces` alongside the goal fields.
+- Plan generation prompt: race line now includes race_distance, finish-mode (just finish vs target time), and target paces. AI is instructed to calibrate threshold + race-pace zones to those targets.
+- `triggerAdaptation` prompt: rules 3 + 5 updated — adaptation reasoning must reference goal-pace progress when relevant. Profile JSON fed to Claude includes race_distance, goal_time_seconds, goal_paces.
+- `components/PlanViewModes.tsx` — new client tab strip: "This week" / "Next 4 weeks" / "Full plan". The first two render `PlanWeekView` for one or four weeks. "Full plan" opens the timeline modal.
+- `components/PlanTimelineView.tsx` — refinements:
+  - Each week card shows a prominent phase chip (Base/Build/Peak/Taper) colored per phase.
+  - Weeks beyond a 4-week adaptation horizon dim to 70% opacity. A one-line disclosure panel sits immediately above the first dimmed week: "Sessions beyond 4 weeks are subject to adaptation as your training progresses."
+- Dashboard now renders `PlanViewModes` instead of a single `PlanWeekView`.
+
+**Deferred:**
+- Benchmark protocol session matching with logged sessions (i.e., if a user logs a run via `/app/log` on benchmark Day 1, automatically count it). Currently the user enters the result inline on the benchmark board. Acceptable for v1 dogfood.
+- Rich progressive-overload visualization for strength sessions (showing last week's weight on this week's prescription card). Adaptation engine sees the data; the UI doesn't surface it inline yet.
+- Goal-pace progress card on the dashboard (e.g., "You're 8s/km off your run goal pace"). The data exists; would need a comparison helper between `recent_sessions` average paces and `goal_paces`.
+- Migration of existing users' plans via `/api/admin/migrate-plans` is built but must be run manually after deploy. CLAUDE.md keeps it in the ops checklist below.
+- Adaptation horizon disclosure copy could route to a help/explanation page; currently text-only.
+
+**Decisions not in prompt:**
+- Kept the `generateFallbackPlan` name (prompt called it `generateStarterPlan`). Existing function, semantics match.
+- Calibration choice stored on `profiles.calibration_choice` rather than in a transient session — lets the user resume mid-onboarding with their pick intact.
+- Benchmark mode page is at `/app/onboarding/benchmark` (not the dashboard) — the user is mid-onboarding when they reach it; the `/app/dashboard` route is reserved for post-plan state.
+- `restartPlan` stamps `last_plan_restart_at` BEFORE archiving the plan or running the flow. Means an abandoned restart still counts toward the 30-day rate limit. Trade-off: prevents accidental rapid-fire restarts.
+- Strength session HC2 happens server-side in `finishStrengthSession`. The session row itself isn't saved when injury fires — the user is redirected to the dashboard, which renders the global injury referral via the existing layout query. Mirrors session 7's pattern.
+- LiveWorkoutTracker rest timer ticks at 1Hz via `setInterval`. The interval is the side effect of an effect that watches `restActive`; clearing happens both on cleanup and on `setRestActive(false)`. Avoids lingering intervals.
+- Plan timeline phase colors: Base=blue, Build=teal, Peak=orange, Taper=purple. Distinct, not overloading the existing teal/red brand palette.
+- "Full plan" tab in `PlanViewModes` opens the modal but doesn't change the inline mode — closing the modal returns the user to "This week". Reads more like an action button than a sticky tab; matches what a user actually wants when peeking at the long-term view.
+- Goal-time captured in three separate hh/mm/ss inputs rather than a single `<input type="time">` — the latter caps at 24h (insufficient for some Ironman finish times) and has poor mobile UX in the dark theme.
+- Race goal fields are optional. Goal-mode `'finish'` is the default — the AI gracefully degrades to "build for completion, no time target" when paces aren't set.
+- Block validator (`callBlock`) still requires the AI to return weeks numbered exactly `[blockStart, blockEnd]`. After date-anchoring, this catches AI drift quickly.
+- The 4-week adaptation horizon is a constant (`ADAPTATION_HORIZON_WEEKS`) at the top of `PlanTimelineView`. If we change it, only that line updates.
+
+**Requires manual setup before this works in prod:**
+- Re-run `supabase/schema.sql` (idempotent — adds `benchmarks`, `strength_session_sets`, `founder_bug_log` if not already present, plus the new profile columns).
+- After deploy, optionally call `POST /api/admin/migrate-plans?dry=1` to see which active plans need regeneration; then call without `?dry=1` to actually migrate. Founder-gated.
+- For strength sessions to populate exercises, the user's `strength_preference` must be set (default for existing users is `'none'` per schema default). Run a plan regeneration after toggling it via restart.
+- For race goal calibration, fill in race distance + target time during onboarding (or via plan restart) — empty is fine, plan will build for completion.
 
 ### Session 14 — May 2026
 **Completed:**

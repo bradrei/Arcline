@@ -44,6 +44,15 @@ export interface OnboardingFormData {
   goal_type: 'event_date' | 'pace_ability'
   goal_date: string
   goal_description: string
+  // Race goal extras (event_date only) — Session 18
+  race_distance: '' | 'sprint' | 'olympic' | '70.3' | 'ironman' | 'standalone_run' | 'other'
+  goal_mode: 'finish' | 'time'
+  goal_time_hh: string
+  goal_time_mm: string
+  goal_time_ss: string
+  swim_pace_per_100m: string
+  bike_kmh: string
+  run_pace_per_km: string
   // Step 9 (was 8): calibration
   calibration_choice: 'import' | 'benchmark' | 'fresh' | ''
 }
@@ -65,6 +74,21 @@ function profileToFormData(profile: Profile | null): OnboardingFormData {
     goal_type: (profile?.goal_type as OnboardingFormData['goal_type']) ?? 'event_date',
     goal_date: profile?.goal_date ?? '',
     goal_description: profile?.goal_description ?? '',
+    race_distance:
+      (profile?.race_distance as OnboardingFormData['race_distance']) ?? '',
+    goal_mode: profile?.goal_time_seconds ? 'time' : 'finish',
+    goal_time_hh: profile?.goal_time_seconds
+      ? String(Math.floor(profile.goal_time_seconds / 3600))
+      : '',
+    goal_time_mm: profile?.goal_time_seconds
+      ? String(Math.floor((profile.goal_time_seconds % 3600) / 60)).padStart(2, '0')
+      : '',
+    goal_time_ss: profile?.goal_time_seconds
+      ? String(profile.goal_time_seconds % 60).padStart(2, '0')
+      : '',
+    swim_pace_per_100m: profile?.goal_paces?.swim_per_100m ?? '',
+    bike_kmh: profile?.goal_paces?.bike_kmh != null ? String(profile.goal_paces.bike_kmh) : '',
+    run_pace_per_km: profile?.goal_paces?.run_per_km ?? '',
     calibration_choice: (profile?.calibration_choice as OnboardingFormData['calibration_choice']) ?? '',
   }
 }
@@ -168,11 +192,30 @@ export function OnboardingFlow({ initialProfile }: Props) {
       7: {
         strength_preference: formData.strength_preference,
       },
-      8: {
-        goal_type: formData.goal_type,
-        goal_date: formData.goal_date || null,
-        goal_description: formData.goal_description,
-      },
+      8: (() => {
+        const isEvent = formData.goal_type === 'event_date'
+        const useTime = isEvent && formData.goal_mode === 'time'
+        const goalSeconds = useTime
+          ? (Number(formData.goal_time_hh || 0) * 3600 +
+              Number(formData.goal_time_mm || 0) * 60 +
+              Number(formData.goal_time_ss || 0)) || null
+          : null
+        const paces = useTime
+          ? {
+              swim_per_100m: formData.swim_pace_per_100m || undefined,
+              bike_kmh: formData.bike_kmh ? Number(formData.bike_kmh) : undefined,
+              run_per_km: formData.run_pace_per_km || undefined,
+            }
+          : null
+        return {
+          goal_type: formData.goal_type,
+          goal_date: formData.goal_date || null,
+          goal_description: formData.goal_description,
+          race_distance: isEvent && formData.race_distance ? formData.race_distance : null,
+          goal_time_seconds: goalSeconds,
+          goal_paces: paces,
+        }
+      })(),
     }
 
     const payload = stepPayloads[step]

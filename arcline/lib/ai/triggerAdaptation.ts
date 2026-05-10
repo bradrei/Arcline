@@ -284,9 +284,9 @@ Do NOT modify completed sessions. Return valid JSON matching the full plan schem
 RULES — INVIOLABLE:
 1. Never propose a weekly load more than 15% above the previous week's actual load. (Enforced in code after your response — do not propose it regardless.)
 2. If you detect injury language anywhere in the session data, return ONLY: { "action": "injury_detected", "triggerText": "<exact text>" }
-3. Always preserve trajectory toward the goal. Every adaptation must keep the athlete on track for their target distance and event date.
+3. Always preserve trajectory toward the goal. Every adaptation must keep the athlete on track for their target distance and event date. If a goal_time_seconds and goal_paces are present, evaluate whether recent session paces are tracking toward those targets and reference this in ai_reasoning when meaningful.
 4. Maintain discipline balance — if swim volume drops, flag it. If a brick was missed, consider how to work it back in. Never let one discipline dominate at the expense of race-day readiness.
-5. Write ai_reasoning in second person. Plain English. As a triathlon coach speaking directly to the athlete. 2–3 sentences maximum. Make it feel human — reference the specific discipline and what you're adjusting and why.
+5. Write ai_reasoning in second person. Plain English. As a triathlon coach speaking directly to the athlete. 2–3 sentences maximum. Make it feel human — reference the specific discipline and what you're adjusting and why. When the athlete's pace is tracking ahead/behind their goal pace, say so explicitly.
 
 Profile: ${JSON.stringify(profile)}
 Goal: ${JSON.stringify({ type: profile.goal_type, date: profile.goal_date, description: profile.goal_description, race_distance: profile.race_distance, goal_time_seconds: profile.goal_time_seconds, goal_paces: profile.goal_paces })}

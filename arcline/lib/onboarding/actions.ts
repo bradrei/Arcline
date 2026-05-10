@@ -294,6 +294,9 @@ export async function completeRestart(
       goal_type: data.goal_type,
       goal_date: data.goal_date,
       goal_description: data.goal_description,
+      race_distance: data.race_distance ?? null,
+      goal_time_seconds: data.goal_time_seconds ?? null,
+      goal_paces: data.goal_paces ?? null,
       calibration_choice: data.calibration_choice,
       updated_at: new Date().toISOString(),
     })

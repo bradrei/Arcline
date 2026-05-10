@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import type { Plan, PlanWeek, PlanSession } from '@/types'
+import { computePhase } from '@/lib/plan/phase'
+
+const ADAPTATION_HORIZON_WEEKS = 4
 
 interface Props {
   plan: Plan
@@ -70,7 +73,9 @@ function WeekCard({
   index,
   isCurrent,
   isPast,
+  isFuture,
   isRaceWeek,
+  totalWeeks,
   expanded,
   onToggle,
 }: {
@@ -78,7 +83,9 @@ function WeekCard({
   index: number
   isCurrent: boolean
   isPast: boolean
+  isFuture: boolean
   isRaceWeek: boolean
+  totalWeeks: number
   expanded: boolean
   onToggle: () => void
 }) {
@@ -86,6 +93,7 @@ function WeekCard({
   const activeSessions = week.sessions.filter(s => s.type !== 'rest').length
   const range = dateRangeLabel(week)
   const chips = disciplineChips(week.sessions)
+  const phase = computePhase(week.week_number ?? index + 1, totalWeeks)
 
   return (
     <div
@@ -93,7 +101,7 @@ function WeekCard({
         isCurrent
           ? 'border-brand-teal/40 border-l-4 border-l-brand-teal bg-brand-teal/5'
           : 'border-white/10 bg-surface'
-      } ${isPast ? 'opacity-60' : ''}`}
+      } ${isPast ? 'opacity-60' : ''} ${isFuture ? 'opacity-70' : ''}`}
     >
       <button
         type="button"
@@ -103,6 +111,19 @@ function WeekCard({
         <div className="flex items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             <span className="font-semibold text-foreground">Week {week.week_number ?? index + 1}</span>
+            <span
+              className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                phase === 'Base'
+                  ? 'bg-blue-400/15 text-blue-300'
+                  : phase === 'Build'
+                    ? 'bg-brand-teal/15 text-brand-teal'
+                    : phase === 'Peak'
+                      ? 'bg-orange-400/15 text-orange-300'
+                      : 'bg-purple-400/15 text-purple-300'
+              }`}
+            >
+              {phase}
+            </span>
             {range && (
               <>
                 <span className="text-foreground-muted">·</span>
@@ -254,20 +275,33 @@ export function PlanTimelineView({ plan, currentWeekIndex, open, onClose }: Prop
                 {plan.weeks.map((week, i) => {
                   const isCurrent = i === currentWeekIndex
                   const isPast = i < currentWeekIndex
+                  const horizonEnd = currentWeekIndex + ADAPTATION_HORIZON_WEEKS
+                  const isFuture = i >= horizonEnd
                   const isRaceWeek = isEventGoal && i === plan.weeks.length - 1
+                  // Disclosure once, immediately before the first dimmed (future) week
+                  const showHorizonNotice =
+                    !isPast && i === horizonEnd && i < plan.weeks.length
                   return (
-                    <WeekCard
-                      key={i}
-                      week={week}
-                      index={i}
-                      isCurrent={isCurrent}
-                      isPast={isPast}
-                      isRaceWeek={isRaceWeek}
-                      expanded={expandedWeek === i}
-                      onToggle={() =>
-                        setExpandedWeek(prev => (prev === i ? null : i))
-                      }
-                    />
+                    <div key={i}>
+                      {showHorizonNotice && (
+                        <p className="mb-3 rounded-xl border border-white/5 bg-background/40 px-3 py-2 text-xs text-foreground-muted">
+                          Sessions beyond {ADAPTATION_HORIZON_WEEKS} weeks are subject to adaptation as your training progresses.
+                        </p>
+                      )}
+                      <WeekCard
+                        week={week}
+                        index={i}
+                        isCurrent={isCurrent}
+                        isPast={isPast}
+                        isFuture={isFuture}
+                        isRaceWeek={isRaceWeek}
+                        totalWeeks={plan.weeks.length}
+                        expanded={expandedWeek === i}
+                        onToggle={() =>
+                          setExpandedWeek(prev => (prev === i ? null : i))
+                        }
+                      />
+                    </div>
                   )
                 })}
               </div>

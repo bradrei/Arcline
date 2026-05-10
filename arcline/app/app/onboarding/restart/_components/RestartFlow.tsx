@@ -37,6 +37,20 @@ function profileToData(p: Profile): OnboardingFormData {
     goal_type: (p.goal_type as OnboardingFormData['goal_type']) ?? 'event_date',
     goal_date: p.goal_date ?? '',
     goal_description: p.goal_description ?? '',
+    race_distance: (p.race_distance as OnboardingFormData['race_distance']) ?? '',
+    goal_mode: p.goal_time_seconds ? 'time' : 'finish',
+    goal_time_hh: p.goal_time_seconds
+      ? String(Math.floor(p.goal_time_seconds / 3600))
+      : '',
+    goal_time_mm: p.goal_time_seconds
+      ? String(Math.floor((p.goal_time_seconds % 3600) / 60)).padStart(2, '0')
+      : '',
+    goal_time_ss: p.goal_time_seconds
+      ? String(p.goal_time_seconds % 60).padStart(2, '0')
+      : '',
+    swim_pace_per_100m: p.goal_paces?.swim_per_100m ?? '',
+    bike_kmh: p.goal_paces?.bike_kmh != null ? String(p.goal_paces.bike_kmh) : '',
+    run_pace_per_km: p.goal_paces?.run_per_km ?? '',
     calibration_choice: '',
   }
 }
@@ -77,10 +91,27 @@ export function RestartFlow({ profile }: Props) {
       return
     }
     setIsLoading(true)
+    const isEvent = data.goal_type === 'event_date'
+    const useTime = isEvent && data.goal_mode === 'time'
+    const goalSeconds = useTime
+      ? (Number(data.goal_time_hh || 0) * 3600 +
+          Number(data.goal_time_mm || 0) * 60 +
+          Number(data.goal_time_ss || 0)) || null
+      : null
+    const paces = useTime
+      ? {
+          swim_per_100m: data.swim_pace_per_100m || undefined,
+          bike_kmh: data.bike_kmh ? Number(data.bike_kmh) : undefined,
+          run_per_km: data.run_pace_per_km || undefined,
+        }
+      : null
     const result = await completeRestart({
       goal_type: data.goal_type,
       goal_date: data.goal_date || null,
       goal_description: data.goal_description,
+      race_distance: isEvent && data.race_distance ? data.race_distance : null,
+      goal_time_seconds: goalSeconds,
+      goal_paces: paces,
       calibration_choice: data.calibration_choice,
     })
     if (result?.error) {

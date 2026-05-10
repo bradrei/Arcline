@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import type { Plan, TrainingSession } from '@/types'
-import { PlanWeekView } from '@/components/PlanWeekView'
+import { PlanViewModes } from '@/components/PlanViewModes'
 import { PhaseIndicator } from '@/components/PhaseIndicator'
 import { StreakCounter } from '@/components/gamification/StreakCounter'
 import { WeeklyRing } from '@/components/gamification/WeeklyRing'
@@ -178,10 +178,11 @@ export default async function DashboardPage() {
         </div>
       )}
 
-      {/* Current week sessions */}
-      {currentWeek && (
-        <PlanWeekView
-          week={currentWeek}
+      {/* Plan view modes — this week / 4 weeks / full timeline */}
+      {typedPlan && currentWeek && (
+        <PlanViewModes
+          plan={typedPlan}
+          currentWeekIndex={weekIndex}
           adaptedDates={adaptedDates}
           adaptations={recentAdaptations}
         />
