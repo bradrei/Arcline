@@ -14,6 +14,7 @@ export default async function IntegrationsPage({
     strava?: string
     imported?: string
     skipped?: string
+    calibrate?: string
   }>
 }) {
   const params = await searchParams
@@ -79,6 +80,18 @@ export default async function IntegrationsPage({
         <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
           <p className="text-sm text-amber-300">
             Your Strava token expired during import. Reconnect to continue.
+          </p>
+        </div>
+      )}
+      {params.calibrate === 'import' && (
+        <div className="mb-6 rounded-xl border border-brand-teal/30 bg-brand-teal/10 px-4 py-3">
+          <p className="text-sm font-semibold text-brand-teal">
+            Your plan is generated — now bring in your training history.
+          </p>
+          <p className="mt-1 text-xs text-foreground-muted">
+            {stravaConnected
+              ? 'Tap "Import last 90 days" below. Once imported, head back to Settings and click "Regenerate my plan with full history" so the AI re-tunes your plan around what you\'ve actually been doing.'
+              : 'Connect Strava below, then tap "Import last 90 days" to seed your training history.'}
           </p>
         </div>
       )}

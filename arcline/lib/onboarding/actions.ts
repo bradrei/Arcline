@@ -337,9 +337,12 @@ export async function completeRestart(
   const { error: planError } = await supabase.from('plans').insert(newPlan)
   if (planError) return { error: planError.message }
 
-  redirect(
-    data.calibration_choice === 'import'
-      ? '/app/dashboard?calibrate=import'
-      : '/app/dashboard?plan=regenerated',
-  )
+  // For 'import' calibration, route to integrations so the user can trigger the
+  // 90-day bulk import. The plan was generated with whatever sessions already
+  // existed (initial 10 from Strava connect, or none); after import the user
+  // can click "Regenerate my plan" from settings to fold the new history in.
+  if (data.calibration_choice === 'import') {
+    redirect('/app/settings/integrations?calibrate=import')
+  }
+  redirect('/app/dashboard?plan=regenerated')
 }
