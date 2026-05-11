@@ -65,8 +65,21 @@ export interface Profile {
   race_distance?: 'sprint' | 'olympic' | '70.3' | 'ironman' | 'standalone_run' | 'other' | null
   goal_time_seconds?: number | null
   goal_paces?: { swim_per_100m?: string; bike_kmh?: number; run_per_km?: string } | null
+  weekday_availability?: WeekdayAvailability | null
+  discipline_frequency?: DisciplineFrequency | null
   created_at: string
   updated_at: string
+}
+
+export type WeekdayName = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday'
+
+export type WeekdayAvailability = Record<WeekdayName, { am: boolean; pm: boolean }>
+
+export interface DisciplineFrequency {
+  swim: number
+  bike: number
+  run: number
+  strength: number
 }
 
 export interface BenchmarkProtocolSession {

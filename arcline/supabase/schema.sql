@@ -177,6 +177,8 @@ ALTER TABLE profiles ADD COLUMN IF NOT EXISTS strength_preference text DEFAULT '
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS race_distance text; -- 'sprint' | 'olympic' | '70.3' | 'ironman' | 'standalone_run' | 'other'
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS goal_time_seconds int;
 ALTER TABLE profiles ADD COLUMN IF NOT EXISTS goal_paces jsonb; -- { swim_per_100m?, bike_kmh?, run_per_km? }
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS weekday_availability jsonb; -- { monday: { am, pm }, tuesday: ..., ... }
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS discipline_frequency jsonb; -- { swim, bike, run, strength: 0..7 }
 
 CREATE TABLE IF NOT EXISTS strength_session_sets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

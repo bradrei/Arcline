@@ -311,6 +311,14 @@ function buildBlockPrompt(
     raceLine = `GOAL: ${profile.goal_description ?? 'pace/ability target'} (no fixed event date). Plan length: ${totalWeeks} weeks.`
   }
 
+  const scheduleLine = profile.weekday_availability
+    ? `WEEKDAY AVAILABILITY (am/pm slots the athlete is actually free): ${JSON.stringify(profile.weekday_availability)}\nRespect this. Do NOT schedule sessions on days/slots where both am and pm are false unless absolutely necessary.`
+    : 'Weekday availability not specified — distribute sessions evenly.'
+
+  const mixLine = profile.discipline_frequency
+    ? `DISCIPLINE MIX (target sessions per week): ${JSON.stringify(profile.discipline_frequency)}\nUse these as soft targets; balance against load, recovery, and the athlete's phase.`
+    : 'No specific discipline mix requested — balance across the disciplines listed.'
+
   return `You are Arcline, an expert triathlon and Ironman coach.
 
 TODAY'S DATE: ${todayISO}
@@ -326,6 +334,10 @@ ATHLETE PROFILE:
 - Disciplines: ${(profile.disciplines ?? []).join(', ') || 'triathlon'}
 - Injuries/conditions: ${profile.injuries_conditions || 'none'}
 - Weekly availability: ${profile.weekly_hours_available ?? 6} hours across ${profile.weekly_days_available ?? 4} days
+
+${scheduleLine}
+
+${mixLine}
 
 STRENGTH: ${strengthContext(profile.strength_preference)}${strengthSchemaFragment(profile.strength_preference)}
 

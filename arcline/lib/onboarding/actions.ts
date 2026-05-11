@@ -292,7 +292,7 @@ export async function completeRestart(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: 'Not authenticated.' }
 
-  // Update goal + calibration on profile
+  // Update goal + strength + schedule + calibration on profile
   const { error: profileErr } = await supabase
     .from('profiles')
     .update({
@@ -302,6 +302,9 @@ export async function completeRestart(
       race_distance: data.race_distance ?? null,
       goal_time_seconds: data.goal_time_seconds ?? null,
       goal_paces: data.goal_paces ?? null,
+      strength_preference: data.strength_preference ?? 'none',
+      weekday_availability: data.weekday_availability ?? null,
+      discipline_frequency: data.discipline_frequency ?? null,
       calibration_choice: data.calibration_choice,
       updated_at: new Date().toISOString(),
     })
