@@ -359,36 +359,32 @@ async function callBlock(
   expectedWeekStart: number,
   expectedWeekEnd: number,
 ): Promise<AIPlanWeek[]> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const message = await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: MAX_TOKENS_PER_BLOCK,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      })
+  // Single attempt — Vercel Hobby caps functions at 60s. With chunked generation
+  // and the outer retry, the budget is tight; internal retries push it over.
+  // Fast fail to the outer fallback path on any block error.
+  const message = await client.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: MAX_TOKENS_PER_BLOCK,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  })
 
-      const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
-      const jsonText = rawText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
-      const parsed = JSON.parse(jsonText) as AIPlanOutput
+  const rawText = message.content[0].type === 'text' ? message.content[0].text.trim() : ''
+  const jsonText = rawText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+  const parsed = JSON.parse(jsonText) as AIPlanOutput
 
-      if (!Array.isArray(parsed.weeks) || parsed.weeks.length === 0) {
-        throw new Error('empty weeks array')
-      }
-      if (parsed.weeks[0].week_number !== expectedWeekStart) {
-        throw new Error(`block week_number mismatch: got ${parsed.weeks[0].week_number}, expected ${expectedWeekStart}`)
-      }
-      if (parsed.weeks[parsed.weeks.length - 1].week_number !== expectedWeekEnd) {
-        throw new Error(
-          `block end mismatch: got ${parsed.weeks[parsed.weeks.length - 1].week_number}, expected ${expectedWeekEnd}`,
-        )
-      }
-      return parsed.weeks
-    } catch {
-      if (attempt === 1) throw new Error('block generation failed after retry')
-    }
+  if (!Array.isArray(parsed.weeks) || parsed.weeks.length === 0) {
+    throw new Error('empty weeks array')
   }
-  throw new Error('unreachable')
+  if (parsed.weeks[0].week_number !== expectedWeekStart) {
+    throw new Error(`block week_number mismatch: got ${parsed.weeks[0].week_number}, expected ${expectedWeekStart}`)
+  }
+  if (parsed.weeks[parsed.weeks.length - 1].week_number !== expectedWeekEnd) {
+    throw new Error(
+      `block end mismatch: got ${parsed.weeks[parsed.weeks.length - 1].week_number}, expected ${expectedWeekEnd}`,
+    )
+  }
+  return parsed.weeks
 }
 
 async function generateFullPlanWeeks(
@@ -447,51 +443,42 @@ export async function generatePlan(profile: Profile): Promise<Omit<Plan, 'id'>> 
   const systemPrompt =
     'You are an expert triathlon coach building personalised, periodised, date-anchored training plans for hybrid athletes (swim/bike/run). Your output is JSON only — no markdown, no explanation, no code fences. Every session you generate must include a real ISO date.'
 
-  // Two attempts: if the first plan fails verification, retry once before falling back.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const aiWeeks = await generateFullPlanWeeks(
-        client,
-        systemPrompt,
-        profile,
-        totalWeeks,
-        planStart,
-        raceDate,
-      )
-      const enforced = enforceHC1(aiWeeks)
-      const planWeeks = enforced.map(aiWeekToPlanWeek)
+  // Single attempt within Vercel's 60s function budget. Fast-fall to the static
+  // fallback on any AI failure — the cron picks fallback plans up and retries.
+  try {
+    const aiWeeks = await generateFullPlanWeeks(
+      client,
+      systemPrompt,
+      profile,
+      totalWeeks,
+      planStart,
+      raceDate,
+    )
+    const enforced = enforceHC1(aiWeeks)
+    const planWeeks = enforced.map(aiWeekToPlanWeek)
 
-      const verification = verifyPlan(planWeeks, raceDate)
-      if (!verification.valid) {
-        console.warn(
-          `Plan verification failed (attempt ${attempt + 1}/2):`,
-          verification.issues.join('; '),
-        )
-        if (attempt === 0) continue
-        throw new Error(`Plan verification failed: ${verification.issues.join('; ')}`)
-      }
-
-      return {
-        user_id: profile.id,
-        generated_at: new Date().toISOString(),
-        version: 1,
-        goal_anchor: {
-          goal_type: profile.goal_type,
-          goal_date: profile.goal_date,
-          goal_description: profile.goal_description,
-        },
-        weeks: planWeeks,
-        status: 'active',
-        adaptation_count: 0,
-        is_fallback: false,
-      }
-    } catch (err) {
-      if (attempt === 1) {
-        console.error('Plan generation failed after retry:', err)
-        return generateFallbackPlan(profile, profile.id)
-      }
+    const verification = verifyPlan(planWeeks, raceDate)
+    if (!verification.valid) {
+      console.warn('Plan verification failed:', verification.issues.join('; '))
+      return generateFallbackPlan(profile, profile.id)
     }
-  }
 
-  return generateFallbackPlan(profile, profile.id)
+    return {
+      user_id: profile.id,
+      generated_at: new Date().toISOString(),
+      version: 1,
+      goal_anchor: {
+        goal_type: profile.goal_type,
+        goal_date: profile.goal_date,
+        goal_description: profile.goal_description,
+      },
+      weeks: planWeeks,
+      status: 'active',
+      adaptation_count: 0,
+      is_fallback: false,
+    }
+  } catch (err) {
+    console.error('Plan generation failed:', err)
+    return generateFallbackPlan(profile, profile.id)
+  }
 }
