@@ -255,13 +255,18 @@ export async function restartPlan(): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
+  const founderEmail = process.env.FOUNDER_EMAIL
+  const isFounder = Boolean(founderEmail && user.email === founderEmail)
+
   const { data: profile } = await supabase
     .from('profiles')
     .select('last_plan_restart_at')
     .eq('id', user.id)
     .single()
 
-  if (profile?.last_plan_restart_at) {
+  // Founder accounts bypass the 30-day rate limit so dogfood iteration isn't
+  // gated by it. Everyone else is rate-limited.
+  if (!isFounder && profile?.last_plan_restart_at) {
     const last = new Date(profile.last_plan_restart_at).getTime()
     const daysSince = (+new Date() - last) / (24 * 60 * 60 * 1000)
     if (daysSince < 30) {
@@ -269,9 +274,9 @@ export async function restartPlan(): Promise<void> {
     }
   }
 
-  // Stamp the restart timestamp now so even if the user abandons mid-flow they
-  // can't re-trigger before 30 days. Plan archival happens after they finish
-  // the goal + calibration flow at /app/onboarding/restart.
+  // Stamp the restart timestamp (still useful telemetry for the founder).
+  // Plan archival happens after the goal + calibration flow at
+  // /app/onboarding/restart.
   await supabase
     .from('profiles')
     .update({ last_plan_restart_at: new Date().toISOString() })
