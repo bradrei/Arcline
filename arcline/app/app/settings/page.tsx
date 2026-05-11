@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { regenerateActivePlan, restartPlan } from '@/lib/onboarding/actions'
 import type { Plan, Profile } from '@/types'
+import { PlanMigrationCard } from './_components/PlanMigrationCard'
 
 export const metadata = { title: 'Settings — Arcline' }
 export const dynamic = 'force-dynamic'
@@ -47,6 +48,9 @@ export default async function SettingsPage({
   const profile = profileResult.data as Profile | null
   const plan = planResult.data as Pick<Plan, 'id' | 'version' | 'is_fallback' | 'weeks' | 'generated_at'> | null
   const sessionsCount = sessionsCountResult.count ?? 0
+
+  const founderEmail = process.env.FOUNDER_EMAIL
+  const isFounder = Boolean(founderEmail && user.email === founderEmail)
 
   const planWeekCount = Array.isArray(plan?.weeks) ? plan?.weeks.length : 0
 
@@ -154,6 +158,8 @@ export default async function SettingsPage({
           </form>
         </div>
       </section>
+
+      {isFounder && <PlanMigrationCard />}
     </main>
   )
 }
