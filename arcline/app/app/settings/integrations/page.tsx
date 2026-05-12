@@ -16,6 +16,7 @@ export default async function IntegrationsPage({
     skipped?: string
     calibrate?: string
     detail?: string
+    granted?: string
   }>
 }) {
   const params = await searchParams
@@ -92,6 +93,20 @@ export default async function IntegrationsPage({
           )}
           <p className="mt-1 text-xs text-foreground-muted">
             Try again — usually clears on a second attempt.
+          </p>
+        </div>
+      )}
+      {params.error === 'strava_scope' && (
+        <div className="mb-6 rounded-xl border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <p className="text-sm font-semibold text-red-300">
+            Strava didn&apos;t grant full access to your activities.
+          </p>
+          <p className="mt-1 text-xs text-foreground-muted">
+            Granted scope: <code className="rounded bg-white/5 px-1">{params.granted || '(none)'}</code>
+            <br />
+            Click Connect Strava below and make sure <strong>both</strong> &quot;View data about your
+            public profile&quot; <strong>and</strong> &quot;View data about your private
+            activities&quot; are checked on the Strava approval screen.
           </p>
         </div>
       )}

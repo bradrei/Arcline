@@ -13,8 +13,11 @@ export async function GET() {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    approval_prompt: 'auto',
-    scope: 'activity:read_all',
+    // 'force' makes Strava show the scope approval screen every time. With
+    // 'auto', Strava reuses any prior limited grant — which silently breaks
+    // imports if the user only granted activity:read instead of read_all.
+    approval_prompt: 'force',
+    scope: 'read,activity:read_all',
   })
 
   return NextResponse.redirect(

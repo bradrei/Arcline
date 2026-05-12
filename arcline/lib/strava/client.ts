@@ -7,6 +7,10 @@ export interface StravaToken {
   refresh_token: string
   expires_at: number
   athlete_id: number
+  // Strava returns the granted scope on the token response, e.g.
+  // "read,activity:read_all". We store it so we can detect when the user
+  // granted a narrower scope than we requested.
+  scope?: string
 }
 
 interface StravaActivity {
@@ -76,6 +80,7 @@ export async function exchangeToken(code: string): Promise<{
   refresh_token: string
   expires_at: number
   athlete: { id: number }
+  scope?: string
 }> {
   const res = await fetch('https://www.strava.com/oauth/token', {
     method: 'POST',

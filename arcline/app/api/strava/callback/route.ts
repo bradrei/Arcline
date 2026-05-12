@@ -9,9 +9,20 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl
   const code = searchParams.get('code')
   const error = searchParams.get('error')
+  // Strava returns granted scope here, e.g. "read,activity:read_all". If the
+  // user only ticked some checkboxes, this is narrower than what we asked for.
+  const grantedScope = searchParams.get('scope') ?? ''
 
   if (error || !code) {
     return NextResponse.redirect(`${baseUrl()}/app/settings/integrations?error=strava_denied`)
+  }
+
+  // Reject incomplete scope grants up-front instead of importing 1 activity
+  // and being confused for an hour about why.
+  if (!grantedScope.includes('activity:read_all')) {
+    return NextResponse.redirect(
+      `${baseUrl()}/app/settings/integrations?error=strava_scope&granted=${encodeURIComponent(grantedScope)}`,
+    )
   }
 
   const supabase = await createClient()
@@ -29,6 +40,7 @@ export async function GET(request: NextRequest) {
       refresh_token: tokenData.refresh_token,
       expires_at: tokenData.expires_at,
       athlete_id: tokenData.athlete.id,
+      scope: grantedScope,
     }
 
     // Store token + mark connected, clear reauth flag if it was set
