@@ -93,7 +93,7 @@ export default async function DashboardPage() {
 
   // Prefer the newest non-fallback plan over any older fallback. If only a
   // fallback exists, that's what we render (with the "still tailoring" banner).
-  const [planResult, sessionsResult, recentAdaptations] = await Promise.all([
+  const [planResult, sessionsResult, recentAdaptations, profileResult] = await Promise.all([
     supabase
       .from('plans')
       .select('*')
@@ -110,11 +110,21 @@ export default async function DashboardPage() {
       .gte('session_date', eightWeeksAgo)
       .order('session_date', { ascending: false }),
     getRecentAdaptations(supabase, user.id),
+    supabase
+      .from('profiles')
+      .select('calibration_choice')
+      .eq('id', user.id)
+      .single(),
   ])
 
   const typedPlan = planResult.data as Plan | null
   const sessions = (sessionsResult.data ?? []) as TrainingSession[]
   const adaptedDates = getRecentlyAdaptedSessionDates(recentAdaptations)
+  const calibrationChoice = (profileResult.data?.calibration_choice ?? null) as
+    | 'import'
+    | 'benchmark'
+    | 'fresh'
+    | null
 
   const weekIndex = typedPlan ? getCurrentWeekIndex(typedPlan) : 0
   const currentWeek = typedPlan?.weeks[weekIndex]
@@ -167,7 +177,44 @@ export default async function DashboardPage() {
       {/* No plan state */}
       {!typedPlan && (
         <div className="rounded-xl border border-white/10 bg-surface px-6 py-10 text-center">
-          <p className="text-foreground-muted">No active plan found. Complete onboarding to get started.</p>
+          {calibrationChoice === 'import' ? (
+            <>
+              <p className="text-foreground">Finish setting up: import your Strava history.</p>
+              <p className="mt-2 text-sm text-foreground-muted">
+                Head to{' '}
+                <a href="/app/settings/integrations" className="text-brand-teal underline">
+                  integrations
+                </a>{' '}
+                → tap &quot;Import last 90 days&quot;, then{' '}
+                <a href="/app/settings" className="text-brand-teal underline">
+                  regenerate your plan from settings
+                </a>
+                .
+              </p>
+            </>
+          ) : calibrationChoice === 'benchmark' ? (
+            <>
+              <p className="text-foreground">Benchmark week in progress.</p>
+              <p className="mt-2 text-sm text-foreground-muted">
+                Continue at{' '}
+                <a href="/app/onboarding/benchmark" className="text-brand-teal underline">
+                  /app/onboarding/benchmark
+                </a>{' '}
+                — your plan generates once you log your results.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-foreground">No active plan found.</p>
+              <p className="mt-2 text-sm text-foreground-muted">
+                Generate one from{' '}
+                <a href="/app/settings" className="text-brand-teal underline">
+                  settings
+                </a>
+                , or start a new plan if your goals have changed.
+              </p>
+            </>
+          )}
         </div>
       )}
 

@@ -182,8 +182,15 @@ export async function completeOnboarding(
     redirect('/app/onboarding/benchmark')
   }
 
-  // 'import' and 'fresh' both generate a plan immediately. 'import' users are
-  // nudged to /app/settings/integrations afterwards via a query param banner.
+  if (calibration === 'import') {
+    // Don't generate a plan now — the user is about to import 90 days of
+    // Strava data. Generating now wastes an API call and risks timeout; the
+    // plan will be generated once they regenerate from settings with the
+    // imported history as context.
+    redirect('/app/settings/integrations?calibrate=import')
+  }
+
+  // 'fresh' — generate a plan immediately with whatever profile data exists.
   const planData = await generatePlan(profile as Profile)
 
   const { data: insertedPlan, error: planError } = await supabase
@@ -202,9 +209,6 @@ export async function completeOnboarding(
     })
   }
 
-  if (calibration === 'import') {
-    redirect('/app/dashboard?calibrate=import')
-  }
   redirect('/app/dashboard')
 }
 
@@ -328,7 +332,14 @@ export async function completeRestart(
     redirect('/app/onboarding/benchmark')
   }
 
-  // 'import' or 'fresh' — generate a fresh plan now
+  if (data.calibration_choice === 'import') {
+    // Don't generate a plan now — user is about to import 90 days of Strava
+    // data. Generating now wastes an API call (and risks Vercel timeout); the
+    // plan will be built when they regenerate from settings post-import.
+    redirect('/app/settings/integrations?calibrate=import')
+  }
+
+  // 'fresh' only — generate a plan immediately.
   const { data: profileData } = await supabase
     .from('profiles')
     .select('*')
@@ -340,12 +351,5 @@ export async function completeRestart(
   const { error: planError } = await supabase.from('plans').insert(newPlan)
   if (planError) return { error: planError.message }
 
-  // For 'import' calibration, route to integrations so the user can trigger the
-  // 90-day bulk import. The plan was generated with whatever sessions already
-  // existed (initial 10 from Strava connect, or none); after import the user
-  // can click "Regenerate my plan" from settings to fold the new history in.
-  if (data.calibration_choice === 'import') {
-    redirect('/app/settings/integrations?calibrate=import')
-  }
   redirect('/app/dashboard?plan=regenerated')
 }
