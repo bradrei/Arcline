@@ -7,8 +7,7 @@ import { detectInjury } from '@/lib/ai/detectInjury'
 import { saveSessionAndTriggerAdaptation } from '@/lib/sessions/save'
 import { importStravaHistory } from '@/lib/strava/importHistory'
 import { StravaReauthRequiredError, mapStravaSportType, type StravaToken } from '@/lib/strava/client'
-import { generatePlan } from '@/lib/ai/generatePlan'
-import type { NewSession, Profile, SessionType } from '@/types'
+import type { NewSession, SessionType } from '@/types'
 
 // ── Injury check (session context — also pauses active plan) ─────────────────
 
@@ -338,50 +337,12 @@ export async function importStravaHistory90(): Promise<void> {
     redirect('/app/settings/integrations')
   }
 
-  // If the user has no active plan (came here from the restart flow's
-  // 'import' calibration choice), chain into plan generation now that the
-  // history is in the DB. The plan is generated with that history as
-  // context. If they already have a plan, this is just a data refresh.
-  const { data: activePlan } = await supabase
-    .from('plans')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('status', 'active')
-    .maybeSingle()
-
-  // Generate inside a try, but DO NOT redirect from inside the try block —
-  // Next.js redirect() throws with info in .digest (not .message), so a
-  // try/catch will swallow the redirect unless we detect it correctly. The
-  // safe pattern is: build the plan + insert it inside try, then redirect
-  // outside.
-  let planInsertedSuccessfully = false
-  if (!activePlan) {
-    try {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single()
-
-      if (profileData) {
-        const newPlan = await generatePlan(profileData as Profile)
-        const { error: insertErr } = await supabase.from('plans').insert(newPlan)
-        if (!insertErr) {
-          planInsertedSuccessfully = true
-        } else {
-          console.error('Auto plan insert after import failed:', insertErr)
-        }
-      }
-    } catch (err) {
-      console.error('Auto plan generation after import failed:', err)
-    }
-  }
-
-  if (planInsertedSuccessfully) {
-    redirect(
-      `/app/dashboard?strava=imported&imported=${result.imported}&plan=regenerated`,
-    )
-  }
+  // Note: we used to auto-chain into generatePlan here for users with no
+  // active plan. That was unreliable because import + 22-week plan
+  // generation often pushed past Vercel's 60s function limit. Plan
+  // generation now lives on a dedicated "Generate my plan now" button on
+  // the dashboard empty state (and on /app/settings), giving each operation
+  // its own full function budget.
 
   redirect(
     `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,

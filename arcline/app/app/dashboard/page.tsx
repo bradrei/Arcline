@@ -4,6 +4,7 @@ import type { Plan, TrainingSession } from '@/types'
 import { PlanViewModes } from '@/components/PlanViewModes'
 import { PhaseIndicator } from '@/components/PhaseIndicator'
 import { SessionRecap } from '@/components/SessionRecap'
+import { regenerateActivePlan } from '@/lib/onboarding/actions'
 import { StreakCounter } from '@/components/gamification/StreakCounter'
 import { WeeklyRing } from '@/components/gamification/WeeklyRing'
 import { LoadTrendGraph, type WeekLoad } from '@/components/gamification/LoadTrendGraph'
@@ -184,20 +185,33 @@ export default async function DashboardPage() {
       {!typedPlan && (
         <div className="rounded-xl border border-white/10 bg-surface px-6 py-10 text-center">
           {calibrationChoice === 'import' ? (
-            <>
-              <p className="text-foreground">Finish setting up: import your Strava history.</p>
-              <p className="mt-2 text-sm text-foreground-muted">
-                Head to{' '}
-                <a href="/app/settings/integrations" className="text-brand-teal underline">
-                  integrations
-                </a>{' '}
-                → tap &quot;Import last 90 days&quot;, then{' '}
-                <a href="/app/settings" className="text-brand-teal underline">
-                  regenerate your plan from settings
-                </a>
-                .
-              </p>
-            </>
+            sessions.length > 0 ? (
+              <>
+                <p className="text-foreground">{sessions.length} sessions imported. Ready to build your plan.</p>
+                <p className="mt-2 text-sm text-foreground-muted">
+                  Click below — AI generation takes 30–45 seconds.
+                </p>
+                <form action={regenerateActivePlan} className="mt-4">
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-brand-teal px-6 py-3 text-sm font-semibold text-background transition hover:bg-brand-teal-dim cursor-pointer"
+                  >
+                    Generate my plan now
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <p className="text-foreground">Finish setting up: import your Strava history.</p>
+                <p className="mt-2 text-sm text-foreground-muted">
+                  Head to{' '}
+                  <a href="/app/settings/integrations" className="text-brand-teal underline">
+                    integrations
+                  </a>{' '}
+                  → tap &quot;Import last 90 days&quot; to load your training data.
+                </p>
+              </>
+            )
           ) : calibrationChoice === 'benchmark' ? (
             <>
               <p className="text-foreground">Benchmark week in progress.</p>
