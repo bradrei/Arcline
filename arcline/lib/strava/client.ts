@@ -168,10 +168,13 @@ export function mapStravaToSession(
     distance_km: activity.distance
       ? parseFloat((activity.distance / 1000).toFixed(2))
       : null,
-    avg_hr: activity.average_heartrate ?? null,
-    max_hr: activity.max_heartrate ?? null,
+    // Strava returns these as floats (e.g. avg_hr: 144.3). The DB columns
+    // are int — round here to avoid an "invalid input syntax for type integer"
+    // bulk-insert failure.
+    avg_hr: activity.average_heartrate != null ? Math.round(activity.average_heartrate) : null,
+    max_hr: activity.max_heartrate != null ? Math.round(activity.max_heartrate) : null,
     avg_pace: activity.average_speed ? formatPace(activity.average_speed) : null,
-    power_watts: activity.average_watts ?? null,
+    power_watts: activity.average_watts != null ? Math.round(activity.average_watts) : null,
     notes: activity.description ?? null,
     raw_data: activity as unknown as Record<string, unknown>,
     strava_activity_id: activity.id,
