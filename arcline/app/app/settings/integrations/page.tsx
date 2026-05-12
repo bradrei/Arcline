@@ -15,6 +15,7 @@ export default async function IntegrationsPage({
     imported?: string
     skipped?: string
     calibrate?: string
+    detail?: string
   }>
 }) {
   const params = await searchParams
@@ -80,6 +81,17 @@ export default async function IntegrationsPage({
         <div className="mb-6 rounded-xl border border-amber-400/30 bg-amber-400/5 px-4 py-3">
           <p className="text-sm text-amber-300">
             Your Strava token expired during import. Reconnect to continue.
+          </p>
+        </div>
+      )}
+      {params.error === 'strava_import_failed' && (
+        <div className="mb-6 rounded-xl border border-red-400/30 bg-red-400/5 px-4 py-3">
+          <p className="text-sm font-semibold text-red-300">Import didn&apos;t complete.</p>
+          {params.detail && (
+            <p className="mt-1 break-words text-xs text-red-200/80">{params.detail}</p>
+          )}
+          <p className="mt-1 text-xs text-foreground-muted">
+            Try again — usually clears on a second attempt.
           </p>
         </div>
       )}

@@ -266,24 +266,41 @@ export async function importStravaHistory90(): Promise<void> {
     redirect('/app/settings/integrations?error=strava_not_connected')
   }
 
+  let result: { imported: number; skipped: number } | null = null
+  let caught: unknown = null
+
   try {
-    const result = await importStravaHistory(
+    result = await importStravaHistory(
       supabase,
       user.id,
       profile.strava_token as unknown as StravaToken,
       90,
     )
+  } catch (err) {
+    caught = err
+  }
+
+  // All redirects must be OUTSIDE the try block — next/navigation's redirect()
+  // throws internally and would be swallowed by the catch.
+  if (caught instanceof StravaReauthRequiredError) {
+    await supabase
+      .from('profiles')
+      .update({ strava_needs_reauth: true })
+      .eq('id', user.id)
+    redirect('/app/settings/integrations?error=strava_reauth')
+  }
+  if (caught) {
+    console.error('Strava 90-day import failed:', caught)
+    const message = caught instanceof Error ? caught.message : 'unknown error'
+    redirect(
+      `/app/settings/integrations?error=strava_import_failed&detail=${encodeURIComponent(message.slice(0, 200))}`,
+    )
+  }
+
+  if (result) {
     redirect(
       `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,
     )
-  } catch (err) {
-    if (err instanceof StravaReauthRequiredError) {
-      await supabase
-        .from('profiles')
-        .update({ strava_needs_reauth: true })
-        .eq('id', user.id)
-      redirect('/app/settings/integrations?error=strava_reauth')
-    }
-    throw err
   }
+  redirect('/app/settings/integrations')
 }

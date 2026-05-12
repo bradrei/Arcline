@@ -24,6 +24,8 @@ interface ImportResult {
  *   now. See Session 14 decisions in CLAUDE.md.
  * - Adaptation engine is NOT triggered per activity — this is just baseline
  *   load context for future plan generation/adaptations.
+ * - Uses bulk SELECT + bulk INSERT to stay within Vercel's 60s function budget
+ *   even when there are 200+ activities.
  */
 export async function importStravaHistory(
   supabase: SupabaseClient,
@@ -34,8 +36,7 @@ export async function importStravaHistory(
   const after = Math.floor((+new Date() - days * 24 * 60 * 60 * 1000) / 1000)
 
   let token = initialToken
-  let imported = 0
-  let skipped = 0
+  const allActivities: Awaited<ReturnType<typeof getAthleteActivities>>['activities'] = []
   let pages = 0
 
   for (let page = 1; page <= MAX_PAGES; page++) {
@@ -48,25 +49,42 @@ export async function importStravaHistory(
     pages = page
 
     if (activities.length === 0) break
+    allActivities.push(...activities)
+    if (activities.length < PER_PAGE) break
+  }
 
-    for (const activity of activities) {
-      const { data: existing } = await supabase
-        .from('sessions')
-        .select('id')
-        .eq('strava_activity_id', activity.id)
-        .maybeSingle()
-
-      if (existing) {
-        skipped++
-        continue
-      }
-
-      const sessionData = mapStravaToSession(activity, userId)
-      const { error } = await supabase.from('sessions').insert(sessionData)
-      if (!error) imported++
+  if (allActivities.length === 0) {
+    if (token !== initialToken) {
+      await supabase
+        .from('profiles')
+        .update({ strava_token: token as unknown as Record<string, unknown> })
+        .eq('id', userId)
     }
+    return { imported: 0, skipped: 0, pages }
+  }
 
-    if (activities.length < PER_PAGE) break // last page
+  // Bulk dedup check — single query instead of one per activity
+  const activityIds = allActivities.map(a => a.id)
+  const { data: existing } = await supabase
+    .from('sessions')
+    .select('strava_activity_id')
+    .eq('user_id', userId)
+    .in('strava_activity_id', activityIds)
+
+  const existingIds = new Set<number>(
+    (existing ?? []).map(r => (r as { strava_activity_id: number }).strava_activity_id),
+  )
+
+  // Build session rows for new activities only
+  const newSessionRows = allActivities
+    .filter(a => !existingIds.has(a.id))
+    .map(a => mapStravaToSession(a, userId))
+
+  let imported = 0
+  if (newSessionRows.length > 0) {
+    // Bulk insert — single query for the whole batch
+    const { error } = await supabase.from('sessions').insert(newSessionRows)
+    if (!error) imported = newSessionRows.length
   }
 
   // Persist any refreshed token back to the profile
@@ -77,5 +95,5 @@ export async function importStravaHistory(
       .eq('id', userId)
   }
 
-  return { imported, skipped, pages }
+  return { imported, skipped: existingIds.size, pages }
 }
