@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import type { Plan, TrainingSession } from '@/types'
 import { PlanViewModes } from '@/components/PlanViewModes'
 import { PhaseIndicator } from '@/components/PhaseIndicator'
+import { SessionRecap } from '@/components/SessionRecap'
 import { StreakCounter } from '@/components/gamification/StreakCounter'
 import { WeeklyRing } from '@/components/gamification/WeeklyRing'
 import { LoadTrendGraph, type WeekLoad } from '@/components/gamification/LoadTrendGraph'
@@ -89,7 +90,12 @@ export default async function DashboardPage() {
 
   // Fetch plan and sessions in parallel
   const now = new Date()
-  const eightWeeksAgo = new Date(+now - 56 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  // Recap window — max of 90 days or plan length so the user can always see
+  // back to the start of their current training block. Capped at one year.
+  const recapWindowDays = 365
+  const recapStart = new Date(+now - recapWindowDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split('T')[0]
 
   // Prefer the newest non-fallback plan over any older fallback. If only a
   // fallback exists, that's what we render (with the "still tailoring" banner).
@@ -105,9 +111,9 @@ export default async function DashboardPage() {
       .maybeSingle(),
     supabase
       .from('sessions')
-      .select('session_date, duration_min, rpe')
+      .select('*')
       .eq('user_id', user.id)
-      .gte('session_date', eightWeeksAgo)
+      .gte('session_date', recapStart)
       .order('session_date', { ascending: false }),
     getRecentAdaptations(supabase, user.id),
     supabase
@@ -239,6 +245,14 @@ export default async function DashboardPage() {
       <div className="mt-8">
         <h2 className="mb-3 text-sm font-semibold text-foreground-muted">Training load (8 weeks)</h2>
         <LoadTrendGraph data={loadTrendData} />
+      </div>
+
+      {/* Session recap — back to 90 days or plan start, whichever is longer */}
+      <div className="mt-10">
+        <SessionRecap
+          sessions={sessions}
+          planStartDate={typedPlan?.generated_at?.split('T')[0] ?? null}
+        />
       </div>
     </main>
   )

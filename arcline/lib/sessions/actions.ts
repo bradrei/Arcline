@@ -7,7 +7,8 @@ import { detectInjury } from '@/lib/ai/detectInjury'
 import { saveSessionAndTriggerAdaptation } from '@/lib/sessions/save'
 import { importStravaHistory } from '@/lib/strava/importHistory'
 import { StravaReauthRequiredError, type StravaToken } from '@/lib/strava/client'
-import type { NewSession, SessionType } from '@/types'
+import { generatePlan } from '@/lib/ai/generatePlan'
+import type { NewSession, Profile, SessionType } from '@/types'
 
 // ── Injury check (session context — also pauses active plan) ─────────────────
 
@@ -298,6 +299,42 @@ export async function importStravaHistory90(): Promise<void> {
   }
 
   if (result) {
+    // If the user has no active plan (came here from the restart flow's
+    // 'import' calibration choice), chain into plan generation now that the
+    // history is in the DB. The plan is generated with that history as
+    // context. If they already have a plan, this is just a data refresh and
+    // we leave the plan alone.
+    const { data: activePlan } = await supabase
+      .from('plans')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle()
+
+    if (!activePlan) {
+      try {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .single()
+
+        if (profileData) {
+          const newPlan = await generatePlan(profileData as Profile)
+          await supabase.from('plans').insert(newPlan)
+          redirect(
+            `/app/dashboard?strava=imported&imported=${result.imported}&plan=regenerated`,
+          )
+        }
+      } catch (err) {
+        // redirect throws — let it through. Everything else gets logged and
+        // we still send the user to integrations with import success so they
+        // can at least see what was imported.
+        if (err instanceof Error && err.message?.includes('NEXT_REDIRECT')) throw err
+        console.error('Auto plan generation after import failed:', err)
+      }
+    }
+
     redirect(
       `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,
     )
