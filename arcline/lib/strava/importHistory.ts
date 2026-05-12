@@ -82,9 +82,22 @@ export async function importStravaHistory(
 
   let imported = 0
   if (newSessionRows.length > 0) {
-    // Bulk insert — single query for the whole batch
-    const { error } = await supabase.from('sessions').insert(newSessionRows)
-    if (!error) imported = newSessionRows.length
+    // UPSERT with ignoreDuplicates handles the case where another row already
+    // has the same strava_activity_id (the column is globally UNIQUE in our
+    // schema). With a plain INSERT, one conflicting row rolls back the whole
+    // batch; upsert silently skips the conflicts so the rest still land.
+    const { data: insertedRows, error } = await supabase
+      .from('sessions')
+      .upsert(newSessionRows, {
+        onConflict: 'strava_activity_id',
+        ignoreDuplicates: true,
+      })
+      .select('id')
+    if (error) {
+      console.error('Strava bulk import error:', error)
+      throw new Error(`Bulk insert failed: ${error.message}`)
+    }
+    imported = insertedRows?.length ?? 0
   }
 
   // Persist any refreshed token back to the profile
@@ -95,5 +108,10 @@ export async function importStravaHistory(
       .eq('id', userId)
   }
 
-  return { imported, skipped: existingIds.size, pages }
+  return {
+    imported,
+    // Total skipped = previously-known by this user + duplicates handled by upsert
+    skipped: allActivities.length - imported,
+    pages,
+  }
 }
