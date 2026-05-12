@@ -147,16 +147,41 @@ function formatPace(metersPerSecond: number): string {
   return `${mins}:${secs.toString().padStart(2, '0')}`
 }
 
+/**
+ * Map Strava's sport_type values to our SessionType enum.
+ * Strava sport_type list: Ride, VirtualRide, EBikeRide, MountainBikeRide,
+ * GravelRide, EMountainBikeRide, Velomobile, Run, TrailRun, VirtualRun, Swim,
+ * WeightTraining, Workout, Yoga, Walk, Hike, etc.
+ */
+export function mapStravaSportType(rawSportType: string | null | undefined): SessionType {
+  const t = (rawSportType ?? '').toLowerCase()
+  if (
+    t === 'ride' ||
+    t === 'virtualride' ||
+    t === 'ebikeride' ||
+    t === 'emountainbikeride' ||
+    t === 'mountainbikeride' ||
+    t === 'gravelride' ||
+    t === 'velomobile' ||
+    t === 'handcycle'
+  ) {
+    return 'bike'
+  }
+  if (t === 'run' || t === 'trailrun' || t === 'virtualrun') return 'run'
+  if (t === 'swim') return 'swim'
+  if (t === 'weighttraining' || t === 'workout' || t === 'crossfit' || t === 'highintensityintervaltraining') {
+    return 'strength'
+  }
+  if (t === 'race') return 'race'
+  return 'other'
+}
+
 export function mapStravaToSession(
   activity: StravaActivity,
   userId: string,
 ): NewSession {
   const sessionDate = activity.start_date_local.split('T')[0]
-  const rawType = activity.sport_type.toLowerCase().replace(/\s+/g, '_')
-  const knownTypes: SessionType[] = ['swim', 'bike', 'run', 'brick', 'strength', 'rest', 'open_water', 'race']
-  const sessionType: SessionType = knownTypes.includes(rawType as SessionType)
-    ? (rawType as SessionType)
-    : 'other'
+  const sessionType: SessionType = mapStravaSportType(activity.sport_type)
 
   return {
     user_id: userId,

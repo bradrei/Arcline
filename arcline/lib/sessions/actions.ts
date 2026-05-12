@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import { detectInjury } from '@/lib/ai/detectInjury'
 import { saveSessionAndTriggerAdaptation } from '@/lib/sessions/save'
 import { importStravaHistory } from '@/lib/strava/importHistory'
-import { StravaReauthRequiredError, type StravaToken } from '@/lib/strava/client'
+import { StravaReauthRequiredError, mapStravaSportType, type StravaToken } from '@/lib/strava/client'
 import { generatePlan } from '@/lib/ai/generatePlan'
 import type { NewSession, Profile, SessionType } from '@/types'
 
@@ -233,6 +233,42 @@ export async function confirmSession(
   }
 }
 
+// ── Reclassify existing Strava-imported sessions ─────────────────────────────
+
+/**
+ * Surgical fix-up: walks every Strava-imported session for the current user,
+ * derives the correct session_type from raw_data.sport_type using the latest
+ * mapper, and updates only the session_type column. Leaves user edits (rpe,
+ * notes, etc.) untouched.
+ */
+export async function reclassifyStravaSessions(): Promise<void> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: rows } = await supabase
+    .from('sessions')
+    .select('id, raw_data, session_type')
+    .eq('user_id', user.id)
+    .eq('input_method', 'strava')
+
+  let updated = 0
+  for (const row of rows ?? []) {
+    const sportType =
+      (row.raw_data as { sport_type?: string } | null)?.sport_type ?? null
+    if (!sportType) continue
+    const correctType = mapStravaSportType(sportType)
+    if (correctType === row.session_type) continue
+    await supabase
+      .from('sessions')
+      .update({ session_type: correctType })
+      .eq('id', row.id)
+    updated++
+  }
+
+  redirect(`/app/settings/integrations?strava=reclassified&updated=${updated}`)
+}
+
 // ── Strava disconnect ────────────────────────────────────────────────────────
 
 export async function disconnectStrava(): Promise<void> {
@@ -298,46 +334,56 @@ export async function importStravaHistory90(): Promise<void> {
     )
   }
 
-  if (result) {
-    // If the user has no active plan (came here from the restart flow's
-    // 'import' calibration choice), chain into plan generation now that the
-    // history is in the DB. The plan is generated with that history as
-    // context. If they already have a plan, this is just a data refresh and
-    // we leave the plan alone.
-    const { data: activePlan } = await supabase
-      .from('plans')
-      .select('id')
-      .eq('user_id', user.id)
-      .eq('status', 'active')
-      .maybeSingle()
+  if (!result) {
+    redirect('/app/settings/integrations')
+  }
 
-    if (!activePlan) {
-      try {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
+  // If the user has no active plan (came here from the restart flow's
+  // 'import' calibration choice), chain into plan generation now that the
+  // history is in the DB. The plan is generated with that history as
+  // context. If they already have a plan, this is just a data refresh.
+  const { data: activePlan } = await supabase
+    .from('plans')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('status', 'active')
+    .maybeSingle()
 
-        if (profileData) {
-          const newPlan = await generatePlan(profileData as Profile)
-          await supabase.from('plans').insert(newPlan)
-          redirect(
-            `/app/dashboard?strava=imported&imported=${result.imported}&plan=regenerated`,
-          )
+  // Generate inside a try, but DO NOT redirect from inside the try block —
+  // Next.js redirect() throws with info in .digest (not .message), so a
+  // try/catch will swallow the redirect unless we detect it correctly. The
+  // safe pattern is: build the plan + insert it inside try, then redirect
+  // outside.
+  let planInsertedSuccessfully = false
+  if (!activePlan) {
+    try {
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single()
+
+      if (profileData) {
+        const newPlan = await generatePlan(profileData as Profile)
+        const { error: insertErr } = await supabase.from('plans').insert(newPlan)
+        if (!insertErr) {
+          planInsertedSuccessfully = true
+        } else {
+          console.error('Auto plan insert after import failed:', insertErr)
         }
-      } catch (err) {
-        // redirect throws — let it through. Everything else gets logged and
-        // we still send the user to integrations with import success so they
-        // can at least see what was imported.
-        if (err instanceof Error && err.message?.includes('NEXT_REDIRECT')) throw err
-        console.error('Auto plan generation after import failed:', err)
       }
+    } catch (err) {
+      console.error('Auto plan generation after import failed:', err)
     }
+  }
 
+  if (planInsertedSuccessfully) {
     redirect(
-      `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,
+      `/app/dashboard?strava=imported&imported=${result.imported}&plan=regenerated`,
     )
   }
-  redirect('/app/settings/integrations')
+
+  redirect(
+    `/app/settings/integrations?strava=imported&imported=${result.imported}&skipped=${result.skipped}`,
+  )
 }

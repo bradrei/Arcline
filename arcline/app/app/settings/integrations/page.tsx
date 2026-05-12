@@ -1,7 +1,11 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { disconnectStrava, importStravaHistory90 } from '@/lib/sessions/actions'
+import {
+  disconnectStrava,
+  importStravaHistory90,
+  reclassifyStravaSessions,
+} from '@/lib/sessions/actions'
 
 export const metadata = { title: 'Integrations — Arcline' }
 export const maxDuration = 60
@@ -17,6 +21,7 @@ export default async function IntegrationsPage({
     calibrate?: string
     detail?: string
     granted?: string
+    updated?: string
   }>
 }) {
   const params = await searchParams
@@ -70,6 +75,14 @@ export default async function IntegrationsPage({
               ? ` (${params.skipped} already in your log)`
               : ''}
             .
+          </p>
+        </div>
+      )}
+      {params.strava === 'reclassified' && (
+        <div className="mb-6 rounded-xl border border-brand-teal/20 bg-brand-teal/5 px-4 py-3">
+          <p className="text-sm text-brand-teal">
+            Re-classified {params.updated ?? '0'} session
+            {params.updated === '1' ? '' : 's'} based on Strava sport_type.
           </p>
         </div>
       )}
@@ -195,6 +208,18 @@ export default async function IntegrationsPage({
               <p className="mt-2 text-xs text-foreground-muted">
                 One-time import to give your AI coach baseline context. Existing sessions are skipped.
               </p>
+              <form action={reclassifyStravaSessions} className="mt-4">
+                <button
+                  type="submit"
+                  className="rounded-xl border border-white/10 px-4 py-2 text-xs font-medium text-foreground-muted transition hover:border-white/20 hover:text-foreground cursor-pointer"
+                >
+                  Re-classify imported sessions
+                </button>
+                <p className="mt-1.5 text-xs text-foreground-muted/80">
+                  If discipline icons (S/B/R/Br) show as &quot;?&quot; for some sessions, run this once to
+                  fix the session type using the latest Strava mapping.
+                </p>
+              </form>
             </div>
             <p className="mt-4 text-xs text-foreground-muted">
               New Strava activities are imported automatically via webhook.
